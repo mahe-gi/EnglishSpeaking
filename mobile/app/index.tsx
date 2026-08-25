@@ -35,7 +35,7 @@ export default function IndexScreen() {
             Ntalo
           </AppText>
           <AppText variant="subtitle" color="#6B7280" style={styles.tagline}>
-            Speak better where it matters.
+            Speak. Connect. Grow.
           </AppText>
         </View>
 

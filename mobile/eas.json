@@ -11,7 +11,36 @@
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://ntalo-backend-ypqzq.ondigitalocean.app/api/v1",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyB5mVuC2Q2J5J4WUf5366ByqjMNu3_WQh8",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "ntalo-b90ce.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "ntalo-b90ce",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "ntalo-b90ce.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "1006186022804",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:1006186022804:web:70ac22c82fb15945407181",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1006186022804-b6cahav3qmov800g3qid95oiklmbg3h2.apps.googleusercontent.com"
+      }
+    },
+    "production-internal": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://ntalo-backend-ypqzq.ondigitalocean.app/api/v1",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyB5mVuC2Q2J5J4WUf5366ByqjMNu3_WQh8",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "ntalo-b90ce.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "ntalo-b90ce",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "ntalo-b90ce.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "1006186022804",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:1006186022804:web:70ac22c82fb15945407181",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1006186022804-b6cahav3qmov800g3qid95oiklmbg3h2.apps.googleusercontent.com"
+      }
     },
     "production": {}
   },

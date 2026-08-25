@@ -15,7 +15,7 @@ export default function Home() {
       {/* Hero Section */}
       <section className="my-auto py-16">
         <h1 className="text-4xl md:text-6xl font-semibold tracking-tight leading-tight max-w-2xl">
-          Speak better where it matters.
+          Speak. Connect. Grow.
         </h1>
         <p className="mt-6 text-lg md:text-xl text-gray-600 max-w-xl">
           Practice spoken English for job interviews and workplace conversations. Get measurable feedback every day.
