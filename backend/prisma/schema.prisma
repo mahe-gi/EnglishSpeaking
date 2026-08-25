@@ -1,0 +1,176 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum SessionType {
+  ASSESSMENT
+  AI_PRACTICE
+}
+
+enum SessionStatus {
+  IN_PROGRESS
+  ANALYZING
+  COMPLETED
+  ABANDONED
+}
+
+enum PeerSlotStatus {
+  AVAILABLE
+  MATCHED
+  EXPIRED
+  CANCELLED
+}
+
+enum PeerMatchStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  MISSED
+  CANCELLED
+}
+
+model User {
+  id          String   @id @default(cuid())
+  firebaseUid String   @unique
+  email       String   @unique
+  name        String?
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  profile            Profile?
+  practiceSessions   PracticeSession[]
+  peerAvailabilities PeerAvailability[]
+
+  peerMatchesAsA PeerMatch[] @relation("PeerMatchUserA")
+  peerMatchesAsB PeerMatch[] @relation("PeerMatchUserB")
+
+  reportsFiled    Report[] @relation("ReportedBy")
+  reportsReceived Report[] @relation("ReportedAgainst")
+
+  blocksInitiated Block[] @relation("BlockerUser")
+  blocksReceived  Block[] @relation("BlockedUser")
+
+  @@map("users")
+}
+
+model Profile {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal                 String?
+  careerStatus         String?
+  nativeLanguage       String?
+  confidence           Int?
+  baselineScore        Int?
+  currentScore         Int?
+  weaknesses           Json?
+  totalSpeakingSeconds Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+model PracticeSession {
+  id           String        @id @default(cuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         SessionType   @default(AI_PRACTICE)
+  scenario     String?
+  status       SessionStatus @default(IN_PROGRESS)
+  overallScore Int?
+  metrics      Json?
+  feedback     Json?
+  startedAt    DateTime      @default(now())
+  completedAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @default(now()) @updatedAt
+
+  utterances Utterance[]
+
+  @@map("practice_sessions")
+}
+
+model Utterance {
+  id              String          @id @default(cuid())
+  sessionId       String
+  practiceSession PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sequence        Int
+  question        String
+  transcript      String?
+  audioDurationMs Int?
+  wordCount       Int?
+  wordsPerMinute  Float?
+  fillerCount     Int?
+  metrics         Json?
+  createdAt       DateTime        @default(now())
+
+  @@unique([sessionId, sequence])
+  @@map("utterances")
+}
+
+model PeerAvailability {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startsAt  DateTime
+  goal      String?
+  level     String?
+  status    PeerSlotStatus @default(AVAILABLE)
+  createdAt DateTime       @default(now())
+
+  @@unique([userId, startsAt])
+  @@map("peer_availabilities")
+}
+
+model PeerMatch {
+  id          String          @id @default(cuid())
+  userAId     String
+  userBId     String
+  userA       User            @relation("PeerMatchUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB       User            @relation("PeerMatchUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  startsAt    DateTime
+  status      PeerMatchStatus @default(SCHEDULED)
+  livekitRoom String          @unique
+  createdAt   DateTime        @default(now())
+  completedAt DateTime?
+
+  reports Report[]
+
+  @@map("peer_matches")
+}
+
+model Report {
+  id             String   @id @default(cuid())
+  reporterId     String
+  reportedUserId String
+  peerMatchId    String?
+  reason         String
+  details        String?
+  createdAt      DateTime @default(now())
+
+  reporter     User       @relation("ReportedBy", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUser User       @relation("ReportedAgainst", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  peerMatch    PeerMatch? @relation(fields: [peerMatchId], references: [id], onDelete: SetNull)
+
+  @@map("reports")
+}
+
+model Block {
+  id            String   @id @default(cuid())
+  blockerId     String
+  blockedUserId String
+  createdAt     DateTime @default(now())
+
+  blocker     User @relation("BlockerUser", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedUser User @relation("BlockedUser", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedUserId])
+  @@map("blocks")
+}
