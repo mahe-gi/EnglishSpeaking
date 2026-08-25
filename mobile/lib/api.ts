@@ -1,3 +1,4 @@
+import * as FileSystem from "expo-file-system/legacy";
 import { requireEnv } from "./env";
 
 export interface User {
@@ -216,28 +217,33 @@ export async function uploadAssessmentResponse(
     "EXPO_PUBLIC_API_URL"
   );
 
-  const formData = new FormData();
-  formData.append("sequence", sequence.toString());
-  formData.append("durationMs", durationMs.toString());
+  const uploadResult = await FileSystem.uploadAsync(
+    `${apiBaseUrl}/assessments/${sessionId}/responses`,
+    audioUri,
+    {
+      httpMethod: "POST",
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: "audio",
+      mimeType: "audio/m4a",
+      parameters: {
+        sequence: sequence.toString(),
+        durationMs: durationMs.toString(),
+      },
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    }
+  );
 
-  formData.append("audio", {
-    uri: audioUri,
-    name: `prompt_${sequence}.m4a`,
-    type: "audio/m4a",
-  } as unknown as Blob);
+  let json: ApiResponse<{ utterance: Utterance }>;
+  try {
+    json = JSON.parse(uploadResult.body);
+  } catch {
+    throw new Error(`Invalid server response (${uploadResult.status})`);
+  }
 
-  const response = await fetch(`${apiBaseUrl}/assessments/${sessionId}/responses`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: formData,
-  });
-
-  const json: ApiResponse<{ utterance: Utterance }> = await response.json();
-
-  if (!response.ok || !json.success || !json.data) {
-    const errorMsg = json.error?.message || `Upload failed with status ${response.status}`;
+  if (uploadResult.status >= 400 || !json.success || !json.data) {
+    const errorMsg = json.error?.message || `Upload failed with status ${uploadResult.status}`;
     throw new Error(errorMsg);
   }
 
@@ -373,24 +379,48 @@ export async function uploadPracticeResponse(
     "EXPO_PUBLIC_API_URL"
   );
 
-  const formData = new FormData();
-  formData.append("sequence", sequence.toString());
-  formData.append("durationMs", durationMs.toString());
-
   if (audioUri) {
-    formData.append("audio", {
-      uri: audioUri,
-      name: `turn_${sequence}.m4a`,
-      type: "audio/m4a",
-    } as unknown as Blob);
+    const uploadResult = await FileSystem.uploadAsync(
+      `${apiBaseUrl}/practice/sessions/${sessionId}/responses`,
+      audioUri,
+      {
+        httpMethod: "POST",
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: "audio",
+        mimeType: "audio/m4a",
+        parameters: {
+          sequence: sequence.toString(),
+          durationMs: durationMs.toString(),
+        },
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+        },
+      }
+    );
+
+    let json: ApiResponse<PracticeTurnResponse>;
+    try {
+      json = JSON.parse(uploadResult.body);
+    } catch {
+      throw new Error(`Invalid server response (${uploadResult.status})`);
+    }
+
+    if (uploadResult.status >= 400 || !json.success || !json.data) {
+      const errorMsg =
+        json.error?.message || `Practice response upload failed with status ${uploadResult.status}`;
+      throw new Error(errorMsg);
+    }
+
+    return json.data;
   }
 
   const response = await fetch(`${apiBaseUrl}/practice/sessions/${sessionId}/responses`, {
     method: "POST",
     headers: {
+      "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`,
     },
-    body: formData,
+    body: JSON.stringify({ sequence, durationMs }),
   });
 
   const json: ApiResponse<PracticeTurnResponse> = await response.json();

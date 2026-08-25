@@ -26,11 +26,12 @@ export async function transcribeWithSarvam(
   formData.append("file", blob, filename);
   formData.append("model", "saaras:v4");
   formData.append("mode", "verbatim");
+  formData.append("language_code", "unknown");
 
   let response: Response;
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
 
     response = await fetch("https://api.sarvam.ai/speech-to-text", {
       method: "POST",
@@ -55,6 +56,8 @@ export async function transcribeWithSarvam(
   }
 
   if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`[Sarvam STT Error] Status: ${response.status}, Body: ${errorBody}`);
     const error: AppError = new Error("Speech-to-text provider failed to process audio.");
     error.statusCode = response.status >= 500 ? 502 : 422;
     error.code = "PROVIDER_ERROR";

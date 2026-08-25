@@ -95,11 +95,15 @@ export function useAuth() {
 
       const result = await signInWithGoogleNative();
 
-      if (result.cancelled || !result.idToken) {
+      if (result.cancelled) {
         if (isMounted.current) {
           setStatus("idle");
         }
         return;
+      }
+
+      if (!result.idToken) {
+        throw new Error("No Google ID token was received from the sign-in provider.");
       }
 
       const credential = GoogleAuthProvider.credential(result.idToken);

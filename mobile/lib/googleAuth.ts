@@ -32,7 +32,13 @@ export async function signInWithGoogleNative(): Promise<GoogleSignInResult> {
 
   try {
     await GoogleOneTapSignIn.checkPlayServices(true);
-    const response = await GoogleOneTapSignIn.signIn();
+    let response = await GoogleOneTapSignIn.signIn();
+
+    if (response.type === "noSavedCredentialFound") {
+      console.log("[GoogleSignIn] No saved one-tap credential, presenting explicit account picker...");
+      response = await GoogleOneTapSignIn.presentExplicitSignIn();
+    }
+
     console.log("[GoogleSignIn] Native response:", JSON.stringify(response));
 
     if (isSuccessResponse(response)) {
@@ -41,7 +47,7 @@ export async function signInWithGoogleNative(): Promise<GoogleSignInResult> {
     }
 
     if (isCancelledResponse(response)) {
-      console.log("[GoogleSignIn] User cancelled or no credentials available.");
+      console.log("[GoogleSignIn] User cancelled account selection.");
       return { idToken: null, cancelled: true };
     }
 
