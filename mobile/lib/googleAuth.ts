@@ -33,6 +33,7 @@ export async function signInWithGoogleNative(): Promise<GoogleSignInResult> {
   try {
     await GoogleOneTapSignIn.checkPlayServices(true);
     const response = await GoogleOneTapSignIn.signIn();
+    console.log("[GoogleSignIn] Native response:", JSON.stringify(response));
 
     if (isSuccessResponse(response)) {
       const idToken = response.data.idToken || null;
@@ -40,11 +41,14 @@ export async function signInWithGoogleNative(): Promise<GoogleSignInResult> {
     }
 
     if (isCancelledResponse(response)) {
+      console.log("[GoogleSignIn] User cancelled or no credentials available.");
       return { idToken: null, cancelled: true };
     }
 
+    console.warn("[GoogleSignIn] Unhandled response type:", response);
     return { idToken: null, cancelled: false };
   } catch (error: unknown) {
+    console.error("[GoogleSignIn] Native error:", error);
     const err = error as { code?: string; message?: string };
     if (
       err.message?.includes("CANCELED") ||
