@@ -12,7 +12,20 @@
           "package_name": "com.ntalo.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "1006186022804-o9p3ssikf1ios3rgrucq7oq1fvaqp9ic.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ntalo.app",
+            "certificate_hash": "c661fe1d7dbbd67b26379a1c6b1f932fe45b763c"
+          }
+        },
+        {
+          "client_id": "1006186022804-b6cahav3qmov800g3qid95oiklmbg3h2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyChUtK1xhX6a-KDsllax5M0IBnLe1oj0aI"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1006186022804-b6cahav3qmov800g3qid95oiklmbg3h2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
