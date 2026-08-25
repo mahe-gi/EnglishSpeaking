@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "Ntalo",
+    "slug": "ntalo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "ntalo",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.ntalo.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Ntalo requires microphone access to record spoken English practice responses."
+      },
+      "bitcode": false
+    },
+    "android": {
+      "package": "com.ntalo.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-dev-client",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Ntalo to access your microphone for spoken practice."
+        }
+      ],
+      "expo-asset",
+      [
+        "react-native-nitro-google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.placeholder"
+        }
+      ],
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2dd72322-48c9-4b7f-b2bc-ecf72af46a6f"
+      }
+    },
+    "owner": "mahe8"
+  }
+}
