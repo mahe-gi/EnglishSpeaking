@@ -13,10 +13,12 @@ export function createPeerRouter(options: PeerRouterOptions = {}): Router {
   const auth = options.tokenVerifier ? createAuthMiddleware(options.tokenVerifier) : authMiddleware;
   const controller = createPeerController(options.tokenGenerator);
 
-  router.get("/peer/slots", auth, controller.getSlots);
-  router.post("/peer/availability", auth, controller.bookAvailability);
-  router.delete("/peer/availability/:id", auth, controller.cancelAvailability);
-  router.get("/peer/matches/upcoming", auth, controller.getUpcomingMatch);
+  // Matchmaking Queue
+  router.post("/peer/matchmaking/join", auth, controller.joinQueue);
+  router.get("/peer/matchmaking/status", auth, controller.getQueueStatus);
+  router.delete("/peer/matchmaking/leave", auth, controller.leaveQueue);
+
+  // Match Session
   router.post("/peer/matches/:id/token", auth, controller.getMatchToken);
   router.post("/peer/matches/:id/complete", auth, controller.completeMatch);
   router.post("/peer/matches/:id/report", auth, controller.reportPartner);
@@ -25,4 +27,16 @@ export function createPeerRouter(options: PeerRouterOptions = {}): Router {
   return router;
 }
 
+export function createWebhookRouter(): Router {
+  const router = Router();
+  const controller = createPeerController();
+
+  router.post("/", controller.handleLiveKitWebhook);
+
+  return router;
+}
+
+
 export const peerRouter = createPeerRouter();
+export const webhookRouter = createWebhookRouter();
+

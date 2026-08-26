@@ -53,7 +53,9 @@ backend/prisma/*.db-journal
 # Temporary / Audio files
 temp/
 tmp/
+scratch/
 *.wav
 *.mp3
 *.m4a
 *.webm
+

@@ -267,9 +267,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const isAnonymous = user?.identityType === "ANONYMOUS" || !!firebaseUser?.isAnonymous;
+  const isAnonymous = user ? user.identityType === "ANONYMOUS" : !!firebaseUser?.isAnonymous;
   const productState: ProductState = entitlements?.productState || (isAnonymous ? "GUEST" : "FREE");
   const isAgeConfirmed = !!user?.peerAgeConfirmedAt;
+
 
   const value: AuthContextType = {
     status,

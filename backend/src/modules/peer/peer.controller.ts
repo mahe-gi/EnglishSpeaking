@@ -1,21 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { AppError } from "../../middleware/error.middleware.js";
-import {
-  getSlots,
-  bookAvailability,
-  cancelAvailability,
-  getUpcomingMatch,
-  getMatchToken,
-  completeMatch,
-  reportPartner,
-  blockPartner,
-} from "./peer.service.js";
+import { PeerService } from "./peer.service.js";
 import { GeneratePeerTokenFunction } from "../../services/livekit.service.js";
-
-const BookSlotSchema = z.object({
-  startAt: z.string().datetime(),
-});
 
 const ReportSchema = z.object({
   reason: z.enum([
@@ -24,6 +11,8 @@ const ReportSchema = z.object({
     "SEXUAL_CONTENT",
     "PERSONAL_INFORMATION",
     "SPAM",
+    "AUDIO_QUALITY",
+    "INAPPROPRIATE_BEHAVIOR",
     "OTHER",
   ]),
   details: z.string().max(500).optional(),
@@ -31,7 +20,7 @@ const ReportSchema = z.object({
 
 export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction) {
   return {
-    async getSlots(req: Request, res: Response, next: NextFunction) {
+    async joinQueue(req: Request, res: Response, next: NextFunction) {
       try {
         if (!req.auth) {
           const error: AppError = new Error("Authentication required.");
@@ -40,7 +29,7 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
           throw error;
         }
 
-        const data = await getSlots(req.auth);
+        const data = await PeerService.joinQueue(req.auth);
         res.status(200).json({
           success: true,
           data,
@@ -50,7 +39,7 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
       }
     },
 
-    async bookAvailability(req: Request, res: Response, next: NextFunction) {
+    async getQueueStatus(req: Request, res: Response, next: NextFunction) {
       try {
         if (!req.auth) {
           const error: AppError = new Error("Authentication required.");
@@ -59,15 +48,7 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
           throw error;
         }
 
-        const parsed = BookSlotSchema.safeParse(req.body);
-        if (!parsed.success) {
-          const error: AppError = new Error("Valid startAt ISO date-time is required.");
-          error.statusCode = 400;
-          error.code = "INVALID_SLOT_FORMAT";
-          throw error;
-        }
-
-        const data = await bookAvailability(req.auth, parsed.data.startAt);
+        const data = await PeerService.getQueueStatus(req.auth);
         res.status(200).json({
           success: true,
           data,
@@ -77,7 +58,7 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
       }
     },
 
-    async cancelAvailability(req: Request, res: Response, next: NextFunction) {
+    async leaveQueue(req: Request, res: Response, next: NextFunction) {
       try {
         if (!req.auth) {
           const error: AppError = new Error("Authentication required.");
@@ -86,27 +67,7 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
           throw error;
         }
 
-        const availabilityId = req.params.id as string;
-        const data = await cancelAvailability(req.auth, availabilityId);
-        res.status(200).json({
-          success: true,
-          data,
-        });
-      } catch (err) {
-        next(err);
-      }
-    },
-
-    async getUpcomingMatch(req: Request, res: Response, next: NextFunction) {
-      try {
-        if (!req.auth) {
-          const error: AppError = new Error("Authentication required.");
-          error.statusCode = 401;
-          error.code = "UNAUTHORIZED";
-          throw error;
-        }
-
-        const data = await getUpcomingMatch(req.auth);
+        const data = await PeerService.leaveQueue(req.auth);
         res.status(200).json({
           success: true,
           data,
@@ -126,7 +87,7 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
         }
 
         const matchId = req.params.id as string;
-        const data = await getMatchToken(req.auth, matchId, tokenGenerator);
+        const data = await PeerService.getMatchToken(req.auth, matchId, tokenGenerator);
         res.status(200).json({
           success: true,
           data,
@@ -146,7 +107,7 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
         }
 
         const matchId = req.params.id as string;
-        const data = await completeMatch(req.auth, matchId);
+        const data = await PeerService.completeMatch(req.auth, matchId);
         res.status(200).json({
           success: true,
           data,
@@ -174,7 +135,7 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
           throw error;
         }
 
-        const data = await reportPartner(
+        const data = await PeerService.reportPartner(
           req.auth,
           matchId,
           parsed.data.reason,
@@ -199,7 +160,7 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
         }
 
         const matchId = req.params.id as string;
-        const data = await blockPartner(req.auth, matchId);
+        const data = await PeerService.blockPartner(req.auth, matchId);
         res.status(200).json({
           success: true,
           data,
@@ -208,5 +169,25 @@ export function createPeerController(tokenGenerator?: GeneratePeerTokenFunction)
         next(err);
       }
     },
+
+    async handleLiveKitWebhook(req: Request, res: Response, next: NextFunction) {
+      try {
+        const rawBody = Buffer.isBuffer(req.body)
+          ? req.body.toString("utf8")
+          : typeof req.body === "string"
+          ? req.body
+          : JSON.stringify(req.body);
+
+        const authHeader = req.headers.authorization;
+        const result = await PeerService.handleLiveKitWebhook(rawBody, authHeader);
+        res.status(200).json({
+          success: true,
+          result,
+        });
+      } catch (err) {
+        next(err);
+      }
+    },
   };
 }
+

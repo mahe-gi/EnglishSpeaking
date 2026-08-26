@@ -78,7 +78,8 @@ export function getActiveReservationFilter(now: Date = new Date()): Prisma.Voice
 
 export async function calculateEntitlements(
   user: User,
-  installationId?: string | null
+  installationId?: string | null,
+  db: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<UserEntitlements> {
   const isAnonymous = user.identityType === "ANONYMOUS";
   const isAgeConfirmed = !!user.peerAgeConfirmedAt;
@@ -97,14 +98,14 @@ export async function calculateEntitlements(
     }
 
     const [ledgerUsage, activeSessions] = await Promise.all([
-      prisma.usageLedger.aggregate({
+      db.usageLedger.aggregate({
         _sum: { billableSeconds: true },
         where: {
           installationId,
           type: "AI",
         },
       }),
-      prisma.voiceSession.aggregate({
+      db.voiceSession.aggregate({
         _sum: { reservedSeconds: true },
         where: {
           installationId,
@@ -140,7 +141,7 @@ export async function calculateEntitlements(
 
   if (isPremium) {
     const [monthlyAiUsage, dailyPeerUsage, activeAiSessions] = await Promise.all([
-      prisma.usageLedger.aggregate({
+      db.usageLedger.aggregate({
         _sum: { billableSeconds: true },
         where: {
           userId: user.id,
@@ -148,7 +149,7 @@ export async function calculateEntitlements(
           startedAt: { gte: monthStart },
         },
       }),
-      prisma.usageLedger.aggregate({
+      db.usageLedger.aggregate({
         _sum: { billableSeconds: true },
         where: {
           userId: user.id,
@@ -156,7 +157,7 @@ export async function calculateEntitlements(
           startedAt: { gte: dayStart },
         },
       }),
-      prisma.voiceSession.aggregate({
+      db.voiceSession.aggregate({
         _sum: { reservedSeconds: true },
         where: {
           userId: user.id,
@@ -193,7 +194,7 @@ export async function calculateEntitlements(
   // Registered Free User Entitlements - uses canonical userId ONLY
   const [dailyAiUsage, monthlyAiUsage, dailyPeerUsage, activeAiSessions] =
     await Promise.all([
-      prisma.usageLedger.aggregate({
+      db.usageLedger.aggregate({
         _sum: { billableSeconds: true },
         where: {
           userId: user.id,
@@ -201,7 +202,7 @@ export async function calculateEntitlements(
           startedAt: { gte: dayStart },
         },
       }),
-      prisma.usageLedger.aggregate({
+      db.usageLedger.aggregate({
         _sum: { billableSeconds: true },
         where: {
           userId: user.id,
@@ -209,7 +210,7 @@ export async function calculateEntitlements(
           startedAt: { gte: monthStart },
         },
       }),
-      prisma.usageLedger.aggregate({
+      db.usageLedger.aggregate({
         _sum: { billableSeconds: true },
         where: {
           userId: user.id,
@@ -217,7 +218,7 @@ export async function calculateEntitlements(
           startedAt: { gte: dayStart },
         },
       }),
-      prisma.voiceSession.aggregate({
+      db.voiceSession.aggregate({
         _sum: { reservedSeconds: true },
         where: {
           userId: user.id,
@@ -225,6 +226,7 @@ export async function calculateEntitlements(
         },
       }),
     ]);
+
 
   const activeReservedAi = activeAiSessions._sum?.reservedSeconds || 0;
   const usedDailyAi = (dailyAiUsage._sum?.billableSeconds || 0) + activeReservedAi;

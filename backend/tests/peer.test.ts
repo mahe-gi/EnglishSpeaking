@@ -1,25 +1,45 @@
-import { describe, it } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert";
+import crypto from "node:crypto";
 import request from "supertest";
+import { AccessToken } from "livekit-server-sdk";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/lib/prisma.js";
 import { DecodedIdToken } from "firebase-admin/auth";
-import { getUpcomingPeerSlots } from "../src/modules/peer/peer-slots.js";
+import { PeerService } from "../src/modules/peer/peer.service.ts";
+import { env } from "../src/config/env.js";
+
+async function signLiveKitWebhook(body: string): Promise<string> {
+  const hash = crypto.createHash("sha256").update(body).digest("base64");
+  const at = new AccessToken(env.LIVEKIT_API_KEY || "key", env.LIVEKIT_API_SECRET || "secret", {
+    ttl: 60,
+  });
+  at.sha256 = hash;
+  return at.toJwt();
+}
+
+
 
 const mockTokenVerifier = async (token: string): Promise<DecodedIdToken> => {
-  if (token === "token-user-1") {
-    return { uid: "fb-uid-1", email: "user1@example.com", name: "User 1" } as DecodedIdToken;
+  if (token === "token-user-a") {
+    return { uid: "fb-peer-a", email: "peera@example.com", name: "Peer A" } as DecodedIdToken;
   }
-  if (token === "token-user-2") {
-    return { uid: "fb-uid-2", email: "user2@example.com", name: "User 2" } as DecodedIdToken;
+  if (token === "token-user-b") {
+    return { uid: "fb-peer-b", email: "peerb@example.com", name: "Peer B" } as DecodedIdToken;
   }
-  if (token === "token-user-3") {
-    return { uid: "fb-uid-3", email: "user3@example.com", name: "User 3" } as DecodedIdToken;
+  if (token === "token-user-c") {
+    return { uid: "fb-peer-c", email: "peerc@example.com", name: "Peer C" } as DecodedIdToken;
+  }
+  if (token === "token-user-anon") {
+    return { uid: "fb-peer-anon", firebase: { sign_in_provider: "anonymous" } } as unknown as DecodedIdToken;
+  }
+  if (token === "token-user-unconfirmed") {
+    return { uid: "fb-peer-unconf", email: "unconf@example.com" } as DecodedIdToken;
   }
   throw new Error("Invalid token");
 };
 
-const mockPeerTokenGenerator = async (params: { matchId: string; role: "A" | "B" }) => {
+const mockPeerTokenGenerator = async (params: { matchId: string; role: "A" | "B"; ttlSeconds?: number }) => {
   return {
     serverUrl: "wss://livekit.example.com",
     participantToken: `jwt-token-for-${params.matchId}-${params.role}`,
@@ -28,584 +48,710 @@ const mockPeerTokenGenerator = async (params: { matchId: string; role: "A" | "B"
   };
 };
 
-describe("Peer Practice Module", () => {
-  const futureSlot = getUpcomingPeerSlots()[0]!.startAt;
+describe("Instant Peer Practice Module (Phase 3)", () => {
+  let userA: { id: string; firebaseUid: string };
+  let userB: { id: string; firebaseUid: string };
+  let _userC: { id: string; firebaseUid: string };
+  let _userAnon: { id: string; firebaseUid: string };
+  let _userUnconf: { id: string; firebaseUid: string };
 
-  describe("GET /api/v1/peer/slots", () => {
-    it("should return 401 when Authorization header is missing", async () => {
+  beforeEach(async () => {
+    // Clean up test peer data
+    await prisma.usageLedger.deleteMany({
+      where: {
+        firebaseUid: {
+          in: ["fb-peer-a", "fb-peer-b", "fb-peer-c", "fb-peer-anon", "fb-peer-unconf"],
+        },
+      },
+    });
+    await prisma.block.deleteMany();
+    await prisma.report.deleteMany();
+    await prisma.peerMatch.deleteMany();
+    await prisma.peerQueueEntry.deleteMany();
+    await prisma.user.deleteMany({
+      where: {
+        firebaseUid: {
+          in: ["fb-peer-a", "fb-peer-b", "fb-peer-c", "fb-peer-anon", "fb-peer-unconf"],
+        },
+      },
+    });
+
+    // Create test users
+    userA = await prisma.user.create({
+      data: {
+        firebaseUid: "fb-peer-a",
+        email: "peera@example.com",
+        identityType: "REGISTERED",
+        peerAgeConfirmedAt: new Date(),
+      },
+    });
+
+    userB = await prisma.user.create({
+      data: {
+        firebaseUid: "fb-peer-b",
+        email: "peerb@example.com",
+        identityType: "REGISTERED",
+        peerAgeConfirmedAt: new Date(),
+      },
+    });
+
+    _userC = await prisma.user.create({
+      data: {
+        firebaseUid: "fb-peer-c",
+        email: "peerc@example.com",
+        identityType: "REGISTERED",
+        peerAgeConfirmedAt: new Date(),
+      },
+    });
+
+    _userAnon = await prisma.user.create({
+      data: {
+        firebaseUid: "fb-peer-anon",
+        identityType: "ANONYMOUS",
+      },
+    });
+
+    _userUnconf = await prisma.user.create({
+      data: {
+        firebaseUid: "fb-peer-unconf",
+        email: "unconf@example.com",
+        identityType: "REGISTERED",
+        peerAgeConfirmedAt: null,
+      },
+    });
+  });
+
+
+  describe("Safety & Identity Gating", () => {
+    it("should reject unauthenticated request with 401", async () => {
       const app = createApp({ tokenVerifier: mockTokenVerifier });
-      const response = await request(app).get("/api/v1/peer/slots");
-
-      assert.strictEqual(response.status, 401);
-      assert.strictEqual(response.body.error.code, "UNAUTHORIZED");
+      const res = await request(app).post("/api/v1/peer/matchmaking/join");
+      assert.strictEqual(res.status, 401);
     });
 
-    it("should return upcoming selectable peer practice slots", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      prisma.user.findUnique = (async () => ({
-        id: "u-1",
-        firebaseUid: "fb-uid-1",
-        profile: { baselineScore: 80, goal: "JOB_INTERVIEWS" },
-      })) as unknown as typeof prisma.user.findUnique;
+    it("should reject anonymous user with 403 REGISTERED_IDENTITY_REQUIRED", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+      const res = await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-anon");
 
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .get("/api/v1/peer/slots")
-          .set("Authorization", "Bearer token-user-1");
-
-        assert.strictEqual(response.status, 200);
-        assert.strictEqual(response.body.success, true);
-        assert(Array.isArray(response.body.data.slots));
-        assert(response.body.data.slots.length > 0);
-        assert.strictEqual(response.body.data.slots[0].durationMinutes, 15);
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-      }
-    });
-  });
-
-  describe("POST /api/v1/peer/availability", () => {
-    it("should return 409 ASSESSMENT_REQUIRED if user has not completed baseline", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      prisma.user.findUnique = (async () => ({
-        id: "u-1",
-        firebaseUid: "fb-uid-1",
-        profile: { baselineScore: null, goal: "JOB_INTERVIEWS" },
-      })) as unknown as typeof prisma.user.findUnique;
-
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/availability")
-          .set("Authorization", "Bearer token-user-1")
-          .send({ startAt: futureSlot });
-
-        assert.strictEqual(response.status, 409);
-        assert.strictEqual(response.body.error.code, "ASSESSMENT_REQUIRED");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-      }
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.body.error.code, "REGISTERED_IDENTITY_REQUIRED");
     });
 
-    it("should return 400 INVALID_SLOT if startAt is in the past or invalid", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      prisma.user.findUnique = (async () => ({
-        id: "u-1",
-        firebaseUid: "fb-uid-1",
-        profile: { baselineScore: 80, goal: "JOB_INTERVIEWS" },
-      })) as unknown as typeof prisma.user.findUnique;
+    it("should reject registered user with unconfirmed 18+ status with 403 AGE_CONFIRMATION_REQUIRED", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+      const res = await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-unconfirmed");
 
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/availability")
-          .set("Authorization", "Bearer token-user-1")
-          .send({ startAt: "2020-01-01T10:00:00.000Z" });
-
-        assert.strictEqual(response.status, 400);
-        assert.strictEqual(response.body.error.code, "INVALID_SLOT");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-      }
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.body.error.code, "AGE_CONFIRMATION_REQUIRED");
     });
 
-    it("should return 400 INVALID_SLOT if startAt has valid IST hour but is outside published 3-day catalog", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      prisma.user.findUnique = (async () => ({
-        id: "u-1",
-        firebaseUid: "fb-uid-1",
-        profile: { baselineScore: 80, goal: "JOB_INTERVIEWS" },
-      })) as unknown as typeof prisma.user.findUnique;
+    it("should reject user whose peer quota is exhausted with 403 ENTITLEMENT_EXHAUSTED", async () => {
+      // Record 300 seconds of peer usage for userA (Free daily peer limit = 300s)
+      await prisma.usageLedger.create({
+        data: {
+          firebaseUid: userA.firebaseUid,
+          userId: userA.id,
+          type: "PEER",
+          sessionId: "prior-peer-session",
+          billableSeconds: 300,
+          planAtTime: "FREE",
+          startedAt: new Date(),
+          endedAt: new Date(),
+          idempotencyKey: "prior-peer-usage-a",
+        },
+      });
 
-      // 30 days ahead at 18:00 IST (12:30 UTC)
-      const distantFuture = new Date();
-      distantFuture.setDate(distantFuture.getDate() + 30);
-      distantFuture.setUTCHours(12, 30, 0, 0);
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+      const res = await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-a");
 
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/availability")
-          .set("Authorization", "Bearer token-user-1")
-          .send({ startAt: distantFuture.toISOString() });
-
-        assert.strictEqual(response.status, 400);
-        assert.strictEqual(response.body.error.code, "INVALID_SLOT");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-      }
-    });
-
-    it("should return WAITING status for first user booking a slot", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalFindFirstMatch = prisma.peerMatch.findFirst;
-      const originalTransaction = prisma.$transaction;
-
-      prisma.user.findUnique = (async () => ({
-        id: "u-1",
-        firebaseUid: "fb-uid-1",
-        profile: { baselineScore: 80, goal: "JOB_INTERVIEWS", careerStatus: "JOB_SEEKER" },
-      })) as unknown as typeof prisma.user.findUnique;
-
-      prisma.peerMatch.findFirst = (async () => null) as unknown as typeof prisma.peerMatch.findFirst;
-
-      prisma.$transaction = (async (cb: (tx: typeof prisma) => Promise<unknown>) => {
-        const fakeTx = {
-          peerAvailability: {
-            findUnique: async () => null,
-            findMany: async () => [], // No candidate
-            upsert: async () => ({
-              id: "avail-1",
-              userId: "u-1",
-              startsAt: new Date(futureSlot),
-              status: "AVAILABLE",
-            }),
-          },
-          peerMatch: {
-            findFirst: async () => null,
-          },
-          block: {
-            findFirst: async () => null,
-          },
-        };
-        return cb(fakeTx as unknown as typeof prisma);
-      }) as unknown as typeof prisma.$transaction;
-
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/availability")
-          .set("Authorization", "Bearer token-user-1")
-          .send({ startAt: futureSlot });
-
-        assert.strictEqual(response.status, 200);
-        assert.strictEqual(response.body.data.status, "WAITING");
-        assert.strictEqual(response.body.data.availability.id, "avail-1");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerMatch.findFirst = originalFindFirstMatch;
-        prisma.$transaction = originalTransaction;
-      }
-    });
-
-    it("should match second eligible user with first user and create PeerMatch", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalFindFirstMatch = prisma.peerMatch.findFirst;
-      const originalTransaction = prisma.$transaction;
-
-      prisma.user.findUnique = (async () => ({
-        id: "u-2",
-        firebaseUid: "fb-uid-2",
-        profile: { baselineScore: 85, goal: "JOB_INTERVIEWS", careerStatus: "JOB_SEEKER" },
-      })) as unknown as typeof prisma.user.findUnique;
-
-      prisma.peerMatch.findFirst = (async () => null) as unknown as typeof prisma.peerMatch.findFirst;
-
-      let peerMatchCreated = false;
-      prisma.$transaction = (async (cb: (tx: typeof prisma) => Promise<unknown>) => {
-        const fakeTx = {
-          peerAvailability: {
-            findUnique: async () => null,
-            findMany: async () => [
-              {
-                id: "avail-1",
-                userId: "u-1",
-                createdAt: new Date("2026-08-25T10:00:00Z"),
-                user: {
-                  id: "u-1",
-                  profile: { baselineScore: 80, goal: "JOB_INTERVIEWS", careerStatus: "JOB_SEEKER" },
-                },
-              },
-            ],
-            updateMany: async () => ({ count: 1 }),
-            upsert: async () => ({ id: "avail-2", status: "MATCHED" }),
-          },
-          block: {
-            findFirst: async () => null, // No block
-          },
-          peerMatch: {
-            create: async (args: { data: { userAId: string; userBId: string; startsAt: Date } }) => {
-              peerMatchCreated = true;
-              return {
-                id: "match-123",
-                userAId: args.data.userAId,
-                userBId: args.data.userBId,
-                startsAt: args.data.startsAt,
-                status: "SCHEDULED",
-                livekitRoom: "peer_match_123",
-              };
-            },
-            findFirst: async () => null,
-          },
-        };
-        return cb(fakeTx as unknown as typeof prisma);
-      }) as unknown as typeof prisma.$transaction;
-
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/availability")
-          .set("Authorization", "Bearer token-user-2")
-          .send({ startAt: futureSlot });
-
-        assert.strictEqual(response.status, 200);
-        assert.strictEqual(response.body.data.status, "MATCHED");
-        assert.strictEqual(response.body.data.match.id, "match-123");
-        assert.strictEqual(response.body.data.match.role, "B"); // User 2 is Learner B
-        assert.strictEqual(response.body.data.match.partner.label, "Practice Partner");
-        assert.strictEqual(peerMatchCreated, true);
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerMatch.findFirst = originalFindFirstMatch;
-        prisma.$transaction = originalTransaction;
-      }
-    });
-
-    it("should NOT match users if either user has blocked the other (bidirectional block check)", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalFindFirstMatch = prisma.peerMatch.findFirst;
-      const originalTransaction = prisma.$transaction;
-
-      prisma.user.findUnique = (async () => ({
-        id: "u-2",
-        firebaseUid: "fb-uid-2",
-        profile: { baselineScore: 85, goal: "JOB_INTERVIEWS", careerStatus: "JOB_SEEKER" },
-      })) as unknown as typeof prisma.user.findUnique;
-
-      prisma.peerMatch.findFirst = (async () => null) as unknown as typeof prisma.peerMatch.findFirst;
-
-      prisma.$transaction = (async (cb: (tx: typeof prisma) => Promise<unknown>) => {
-        const fakeTx = {
-          peerAvailability: {
-            findUnique: async () => null,
-            findMany: async () => [
-              {
-                id: "avail-1",
-                userId: "u-1",
-                createdAt: new Date("2026-08-25T10:00:00Z"),
-                user: {
-                  id: "u-1",
-                  profile: { baselineScore: 80, goal: "JOB_INTERVIEWS", careerStatus: "JOB_SEEKER" },
-                },
-              },
-            ],
-            upsert: async () => ({
-              id: "avail-2",
-              userId: "u-2",
-              startsAt: new Date(futureSlot),
-              status: "AVAILABLE",
-            }),
-          },
-          block: {
-            // Block exists between u-1 and u-2
-            findFirst: async () => ({ id: "block-1", blockerId: "u-1", blockedUserId: "u-2" }),
-          },
-          peerMatch: {
-            findFirst: async () => null,
-          },
-        };
-        return cb(fakeTx as unknown as typeof prisma);
-      }) as unknown as typeof prisma.$transaction;
-
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/availability")
-          .set("Authorization", "Bearer token-user-2")
-          .send({ startAt: futureSlot });
-
-        assert.strictEqual(response.status, 200);
-        assert.strictEqual(response.body.data.status, "WAITING"); // Stays waiting because candidate was blocked!
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerMatch.findFirst = originalFindFirstMatch;
-        prisma.$transaction = originalTransaction;
-      }
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.body.error.code, "ENTITLEMENT_EXHAUSTED");
     });
   });
 
-  describe("POST /api/v1/peer/matches/:id/token", () => {
-    it("should return 404 if match is not found or user is not a participant", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalFindUniqueMatch = prisma.peerMatch.findUnique;
+  describe("Matchmaking Queue & Pairing", () => {
+    it("should enter queue as SEARCHING when no candidate is available", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+      const res = await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-a");
 
-      prisma.user.findUnique = (async () => ({ id: "u-1", firebaseUid: "fb-uid-1" })) as unknown as typeof prisma.user.findUnique;
-      prisma.peerMatch.findUnique = (async () => null) as unknown as typeof prisma.peerMatch.findUnique;
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.data.status, "SEARCHING");
+      assert(res.body.data.queueEntryId);
+      assert(res.body.data.expiresAt);
 
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/matches/unknown-match/token")
-          .set("Authorization", "Bearer token-user-1");
+      const statusRes = await request(app)
+        .get("/api/v1/peer/matchmaking/status")
+        .set("Authorization", "Bearer token-user-a");
 
-        assert.strictEqual(response.status, 404);
-        assert.strictEqual(response.body.error.code, "MATCH_NOT_FOUND");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerMatch.findUnique = originalFindUniqueMatch;
-      }
+      assert.strictEqual(statusRes.status, 200);
+      assert.strictEqual(statusRes.body.data.status, "SEARCHING");
     });
 
-    it("should return 409 PEER_JOIN_WINDOW_CLOSED if current time is outside join window", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalFindUniqueMatch = prisma.peerMatch.findUnique;
-      const originalFindFirstBlock = prisma.block.findFirst;
+    it("should match User A and User B into exactly one PeerMatch", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
 
-      prisma.user.findUnique = (async () => ({ id: "u-1", firebaseUid: "fb-uid-1" })) as unknown as typeof prisma.user.findUnique;
+      // User A joins
+      const resA = await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-a");
+      assert.strictEqual(resA.body.data.status, "SEARCHING");
 
-      // Match starts in 2 hours (well outside 5-minute pre-window)
-      const twoHoursAhead = new Date(Date.now() + 2 * 60 * 60 * 1000);
-      prisma.peerMatch.findUnique = (async () => ({
-        id: "match-future",
-        userAId: "u-1",
-        userBId: "u-2",
-        startsAt: twoHoursAhead,
-        status: "SCHEDULED",
-      })) as unknown as typeof prisma.peerMatch.findUnique;
+      // User B joins
+      const resB = await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-b");
 
-      prisma.block.findFirst = (async () => null) as unknown as typeof prisma.block.findFirst;
+      assert.strictEqual(resB.status, 200);
+      assert.strictEqual(resB.body.data.status, "MATCHED");
+      assert.strictEqual(resB.body.data.match.role, "B");
+      const matchId = resB.body.data.match.id;
 
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/matches/match-future/token")
-          .set("Authorization", "Bearer token-user-1");
+      // User A polls status -> should be MATCHED
+      const statusResA = await request(app)
+        .get("/api/v1/peer/matchmaking/status")
+        .set("Authorization", "Bearer token-user-a");
 
-        assert.strictEqual(response.status, 409);
-        assert.strictEqual(response.body.error.code, "PEER_JOIN_WINDOW_CLOSED");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerMatch.findUnique = originalFindUniqueMatch;
-        prisma.block.findFirst = originalFindFirstBlock;
-      }
+      assert.strictEqual(statusResA.status, 200);
+      assert.strictEqual(statusResA.body.data.status, "MATCHED");
+      assert.strictEqual(statusResA.body.data.match.id, matchId);
+      assert.strictEqual(statusResA.body.data.match.role, "A");
+
+      // Verify PeerMatch in DB
+      const matches = await prisma.peerMatch.findMany();
+      assert.strictEqual(matches.length, 1);
+      assert.strictEqual(matches[0]?.userAId, userA.id);
+      assert.strictEqual(matches[0]?.userBId, userB.id);
+      assert.strictEqual(matches[0]?.status, "MATCHED");
     });
 
-    it("should generate and return LiveKit participant token when inside join window", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalFindUniqueMatch = prisma.peerMatch.findUnique;
-      const originalFindFirstBlock = prisma.block.findFirst;
+    it("should allow user to cancel search and leave queue", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
 
-      prisma.user.findUnique = (async () => ({ id: "u-1", firebaseUid: "fb-uid-1" })) as unknown as typeof prisma.user.findUnique;
+      await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-a");
 
-      // Match starts right now (inside window: -5m to +10m)
-      const nowSlot = new Date(Date.now() + 60 * 1000); // 1 min from now
-      prisma.peerMatch.findUnique = (async () => ({
-        id: "match-now-1",
-        userAId: "u-1",
-        userBId: "u-2",
-        startsAt: nowSlot,
-        status: "SCHEDULED",
-      })) as unknown as typeof prisma.peerMatch.findUnique;
+      const leaveRes = await request(app)
+        .delete("/api/v1/peer/matchmaking/leave")
+        .set("Authorization", "Bearer token-user-a");
 
-      prisma.block.findFirst = (async () => null) as unknown as typeof prisma.block.findFirst;
+      assert.strictEqual(leaveRes.status, 200);
+      assert.strictEqual(leaveRes.body.data.success, true);
 
-      try {
-        const app = createApp({
-          tokenVerifier: mockTokenVerifier,
-          peerTokenGenerator: mockPeerTokenGenerator,
+      const statusRes = await request(app)
+        .get("/api/v1/peer/matchmaking/status")
+        .set("Authorization", "Bearer token-user-a");
+
+      assert.strictEqual(statusRes.body.data.status, "TIMEOUT");
+    });
+
+    it("should never match users with a mutual block", async () => {
+      // User A blocks User B
+      await prisma.block.create({
+        data: {
+          blockerId: userA.id,
+          blockedUserId: userB.id,
+        },
+      });
+
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      // User A joins
+      await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-a");
+
+      // User B joins -> should not match User A!
+      const resB = await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-b");
+
+      assert.strictEqual(resB.body.data.status, "SEARCHING");
+
+      const matches = await prisma.peerMatch.findMany();
+      assert.strictEqual(matches.length, 0);
+    });
+  });
+
+  describe("Concurrency & High-Contention Tests", () => {
+    it("should handle simultaneous join from User A and User B with exactly one PeerMatch", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      const [resA, resB] = await Promise.all([
+        request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a"),
+        request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b"),
+      ]);
+
+      assert.strictEqual(resA.status, 200);
+      assert.strictEqual(resB.status, 200);
+
+      const matches = await prisma.peerMatch.findMany();
+      assert.strictEqual(matches.length, 1);
+    });
+
+    it("should handle simultaneous join from A, B, and C with no user appearing in two matches", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      const [resA, resB, resC] = await Promise.all([
+        request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a"),
+        request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b"),
+        request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-c"),
+      ]);
+
+      assert.strictEqual(resA.status, 200);
+      assert.strictEqual(resB.status, 200);
+      assert.strictEqual(resC.status, 200);
+
+      const matches = await prisma.peerMatch.findMany();
+      assert.strictEqual(matches.length, 1);
+
+      const waitingQueue = await prisma.peerQueueEntry.findMany({ where: { status: "WAITING" } });
+      assert.strictEqual(waitingQueue.length, 1);
+
+      // Verify no user appears in multiple matches
+      const participantIds = [matches[0]!.userAId, matches[0]!.userBId];
+      const uniqueParticipants = new Set(participantIds);
+      assert.strictEqual(uniqueParticipants.size, 2);
+    });
+
+    it("should handle two simultaneous join requests from User A with max one queue entry", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      const [res1, res2] = await Promise.all([
+        request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a"),
+        request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a"),
+      ]);
+
+      assert.strictEqual(res1.status, 200);
+      assert.strictEqual(res2.status, 200);
+
+      const entries = await prisma.peerQueueEntry.findMany({ where: { userId: userA.id } });
+      assert.strictEqual(entries.length, 1);
+    });
+
+    it("should never match expired queue entries", async () => {
+      // User A created queue entry 60 seconds ago (expired)
+      await prisma.peerQueueEntry.create({
+        data: {
+          userId: userA.id,
+          status: "WAITING",
+          expiresAt: new Date(Date.now() - 60_000),
+        },
+      });
+
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      // User B joins -> should NOT pair with expired User A entry
+      const resB = await request(app)
+        .post("/api/v1/peer/matchmaking/join")
+        .set("Authorization", "Bearer token-user-b");
+
+      assert.strictEqual(resB.body.data.status, "SEARCHING");
+
+      const matches = await prisma.peerMatch.findMany();
+      assert.strictEqual(matches.length, 0);
+    });
+  });
+
+  describe("LiveKit Token Security & Ownership", () => {
+    it("should issue role A token to User A and role B token to User B", async () => {
+      const app = createApp({
+        tokenVerifier: mockTokenVerifier,
+        peerTokenGenerator: mockPeerTokenGenerator,
+      });
+
+      // Form match
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
+
+      // User A requests token
+      const tokenA = await request(app)
+        .post(`/api/v1/peer/matches/${matchId}/token`)
+        .set("Authorization", "Bearer token-user-a");
+
+      assert.strictEqual(tokenA.status, 200);
+      assert.strictEqual(tokenA.body.data.participantIdentity, `peer_${matchId}_a`);
+
+      // User B requests token
+      const tokenB = await request(app)
+        .post(`/api/v1/peer/matches/${matchId}/token`)
+        .set("Authorization", "Bearer token-user-b");
+
+      assert.strictEqual(tokenB.status, 200);
+      assert.strictEqual(tokenB.body.data.participantIdentity, `peer_${matchId}_b`);
+
+      // Non-participant User C requests token -> 403 MATCH_ACCESS_DENIED
+      const tokenC = await request(app)
+        .post(`/api/v1/peer/matches/${matchId}/token`)
+        .set("Authorization", "Bearer token-user-c");
+
+      assert.strictEqual(tokenC.status, 403);
+      assert.strictEqual(tokenC.body.error.code, "MATCH_ACCESS_DENIED");
+    });
+  });
+
+  describe("In-Call Moderation (Report & Block)", () => {
+    it("should allow participant to report partner with reason and details", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
+
+      const reportRes = await request(app)
+        .post(`/api/v1/peer/matches/${matchId}/report`)
+        .set("Authorization", "Bearer token-user-a")
+        .send({
+          reason: "HARASSMENT",
+          details: "Partner was abusive during the call.",
         });
-        const response = await request(app)
-          .post("/api/v1/peer/matches/match-now-1/token")
-          .set("Authorization", "Bearer token-user-1");
 
-        assert.strictEqual(response.status, 200);
-        assert.strictEqual(response.body.success, true);
-        assert.strictEqual(response.body.data.serverUrl, "wss://livekit.example.com");
-        assert.strictEqual(response.body.data.participantToken, "jwt-token-for-match-now-1-A");
-        assert.strictEqual(response.body.data.match.role, "A");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerMatch.findUnique = originalFindUniqueMatch;
-        prisma.block.findFirst = originalFindFirstBlock;
-      }
-    });
-  });
+      assert.strictEqual(reportRes.status, 200);
+      assert.strictEqual(reportRes.body.data.success, true);
 
-  describe("Moderation Actions: Report and Block", () => {
-    it("should allow reporting partner from a match", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalFindUniqueMatch = prisma.peerMatch.findUnique;
-      const originalCreateReport = prisma.report.create;
-
-      prisma.user.findUnique = (async () => ({ id: "u-1", firebaseUid: "fb-uid-1" })) as unknown as typeof prisma.user.findUnique;
-      prisma.peerMatch.findUnique = (async () => ({
-        id: "match-mod-1",
-        userAId: "u-1",
-        userBId: "u-2",
-        startsAt: new Date(),
-        status: "ACTIVE",
-      })) as unknown as typeof prisma.peerMatch.findUnique;
-
-      let reportCreatedAgainst = "";
-      prisma.report.create = (async (args: { data: { reportedUserId: string; reason: string } }) => {
-        reportCreatedAgainst = args.data.reportedUserId;
-        return { id: "rep-1" };
-      }) as unknown as typeof prisma.report.create;
-
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/matches/match-mod-1/report")
-          .set("Authorization", "Bearer token-user-1")
-          .send({ reason: "HARASSMENT", details: "Inappropriate behavior." });
-
-        assert.strictEqual(response.status, 200);
-        assert.strictEqual(response.body.success, true);
-        assert.strictEqual(reportCreatedAgainst, "u-2");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerMatch.findUnique = originalFindUniqueMatch;
-        prisma.report.create = originalCreateReport;
-      }
+      const reports = await prisma.report.findMany();
+      assert.strictEqual(reports.length, 1);
+      assert.strictEqual(reports[0]?.reporterId, userA.id);
+      assert.strictEqual(reports[0]?.reportedUserId, userB.id);
+      assert.strictEqual(reports[0]?.reason, "HARASSMENT");
     });
 
-    it("should allow blocking partner idempotently from a match", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalFindUniqueMatch = prisma.peerMatch.findUnique;
-      const originalUpsertBlock = prisma.block.upsert;
-
-      prisma.user.findUnique = (async () => ({ id: "u-1", firebaseUid: "fb-uid-1" })) as unknown as typeof prisma.user.findUnique;
-      prisma.peerMatch.findUnique = (async () => ({
-        id: "match-mod-1",
-        userAId: "u-1",
-        userBId: "u-2",
-        startsAt: new Date(),
-        status: "ACTIVE",
-      })) as unknown as typeof prisma.peerMatch.findUnique;
-
-      let blockedUser = "";
-      prisma.block.upsert = (async (args: { create: { blockedUserId: string } }) => {
-        blockedUser = args.create.blockedUserId;
-        return { id: "blk-1" };
-      }) as unknown as typeof prisma.block.upsert;
-
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .post("/api/v1/peer/matches/match-mod-1/block")
-          .set("Authorization", "Bearer token-user-1");
-
-        assert.strictEqual(response.status, 200);
-        assert.strictEqual(response.body.success, true);
-        assert.strictEqual(blockedUser, "u-2");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerMatch.findUnique = originalFindUniqueMatch;
-        prisma.block.upsert = originalUpsertBlock;
-      }
-    });
-  });
-
-  describe("DELETE /api/v1/peer/availability/:id", () => {
-    it("should return 401 when Authorization header is missing", async () => {
+    it("should record directional block and terminate current match", async () => {
       const app = createApp({ tokenVerifier: mockTokenVerifier });
-      const response = await request(app).delete("/api/v1/peer/availability/avail-1");
 
-      assert.strictEqual(response.status, 401);
-      assert.strictEqual(response.body.error.code, "UNAUTHORIZED");
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
+
+      const blockRes = await request(app)
+        .post(`/api/v1/peer/matches/${matchId}/block`)
+        .set("Authorization", "Bearer token-user-a");
+
+      assert.strictEqual(blockRes.status, 200);
+      assert.strictEqual(blockRes.body.data.success, true);
+      assert.strictEqual(blockRes.body.data.blockedUserId, userB.id);
+
+      const blocks = await prisma.block.findMany();
+      assert.strictEqual(blocks.length, 1);
+      assert.strictEqual(blocks[0]?.blockerId, userA.id);
+      assert.strictEqual(blocks[0]?.blockedUserId, userB.id);
+    });
+  });
+
+  describe("Lifecycle & Server-Authoritative Ledger Billing", () => {
+    it("should charge 0 seconds and create 0 ledgers if match was never ACTIVE", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
+
+      // Mobile complete call on never-connected match
+      const compRes = await request(app)
+        .post(`/api/v1/peer/matches/${matchId}/complete`)
+        .set("Authorization", "Bearer token-user-a");
+
+      assert.strictEqual(compRes.status, 200);
+
+      const ledgers = await prisma.usageLedger.findMany({ where: { sessionId: matchId } });
+      assert.strictEqual(ledgers.length, 0);
     });
 
-    it("should atomically cancel availability when status is AVAILABLE (count === 1)", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalUpdateMany = prisma.peerAvailability.updateMany;
+    it("should transition to ACTIVE when both join and create 2 UsageLedger entries on complete", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
 
-      prisma.user.findUnique = (async () => ({ id: "u-1", firebaseUid: "fb-uid-1" })) as unknown as typeof prisma.user.findUnique;
-      prisma.peerAvailability.updateMany = (async () => ({ count: 1 })) as unknown as typeof prisma.peerAvailability.updateMany;
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
 
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .delete("/api/v1/peer/availability/avail-1")
-          .set("Authorization", "Bearer token-user-1");
+      // Manually simulate active match with startedAt 60 seconds ago
+      const sixtySecondsAgo = new Date(Date.now() - 60_000);
+      await prisma.peerMatch.update({
+        where: { id: matchId },
+        data: {
+          status: "ACTIVE",
+          startedAt: sixtySecondsAgo,
+          deadlineAt: new Date(sixtySecondsAgo.getTime() + 300_000),
+        },
+      });
 
-        assert.strictEqual(response.status, 200);
-        assert.strictEqual(response.body.success, true);
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerAvailability.updateMany = originalUpdateMany;
-      }
+      // Complete match
+      const compRes = await request(app)
+        .post(`/api/v1/peer/matches/${matchId}/complete`)
+        .set("Authorization", "Bearer token-user-a");
+
+      assert.strictEqual(compRes.status, 200);
+
+      const match = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert.strictEqual(match?.status, "COMPLETED");
+      assert(match?.actualSeconds && match.actualSeconds >= 59 && match.actualSeconds <= 61);
+
+      // Verify TWO ledger rows created
+      const ledgers = await prisma.usageLedger.findMany({ where: { sessionId: matchId } });
+      assert.strictEqual(ledgers.length, 2);
+
+      const ledgerA = ledgers.find((l) => l.userId === userA.id);
+      const ledgerB = ledgers.find((l) => l.userId === userB.id);
+
+      assert(ledgerA);
+      assert(ledgerB);
+      assert.strictEqual(ledgerA?.type, "PEER");
+      assert.strictEqual(ledgerB?.type, "PEER");
+      assert.strictEqual(ledgerA?.idempotencyKey, `peer:${matchId}:${userA.id}`);
+      assert.strictEqual(ledgerB?.idempotencyKey, `peer:${matchId}:${userB.id}`);
+
+      // Second completion call should be idempotent (no duplicate ledger rows)
+      await request(app)
+        .post(`/api/v1/peer/matches/${matchId}/complete`)
+        .set("Authorization", "Bearer token-user-b");
+
+      const ledgersAfter = await prisma.usageLedger.findMany({ where: { sessionId: matchId } });
+      assert.strictEqual(ledgersAfter.length, 2);
     });
 
-    it("should return 409 MATCHED_CANNOT_CANCEL_AVAILABILITY when candidate was concurrently matched (count === 0, status is MATCHED)", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalUpdateMany = prisma.peerAvailability.updateMany;
-      const originalFindUniqueAvail = prisma.peerAvailability.findUnique;
+    it("should keep status MATCHED and startedAt null when only User A joins", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
 
-      prisma.user.findUnique = (async () => ({ id: "u-1", firebaseUid: "fb-uid-1" })) as unknown as typeof prisma.user.findUnique;
-      // updateMany returns count 0 because matching concurrently claimed it to MATCHED
-      prisma.peerAvailability.updateMany = (async () => ({ count: 0 })) as unknown as typeof prisma.peerAvailability.updateMany;
-      prisma.peerAvailability.findUnique = (async () => ({
-        id: "avail-1",
-        userId: "u-1",
-        status: "MATCHED",
-      })) as unknown as typeof prisma.peerAvailability.findUnique;
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
+      const match = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert(match);
 
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .delete("/api/v1/peer/availability/avail-1")
-          .set("Authorization", "Bearer token-user-1");
+      // Simulate LiveKit webhook event: only 1 participant joined
+      const body = JSON.stringify({
+        event: "participant_joined",
+        room: { name: match.livekitRoom, numParticipants: 1 },
+        participant: { identity: `peer_${matchId}_a` },
+      });
+      const token = await signLiveKitWebhook(body);
 
-        assert.strictEqual(response.status, 409);
-        assert.strictEqual(response.body.error.code, "MATCHED_CANNOT_CANCEL_AVAILABILITY");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerAvailability.updateMany = originalUpdateMany;
-        prisma.peerAvailability.findUnique = originalFindUniqueAvail;
-      }
+      const res = await request(app)
+        .post("/api/v1/webhooks/livekit")
+        .set("Content-Type", "application/webhook+json")
+        .set("Authorization", token)
+        .send(body);
+
+      assert.strictEqual(res.status, 200);
+
+      // Verify status is still MATCHED and startedAt is null
+      const matchAfterA = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert.strictEqual(matchAfterA?.status, "MATCHED");
+      assert.strictEqual(matchAfterA?.startedAt, null);
+      assert.strictEqual(matchAfterA?.deadlineAt, null);
     });
 
-    it("should return 200 idempotently if slot was already CANCELLED (count === 0, status is CANCELLED)", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalUpdateMany = prisma.peerAvailability.updateMany;
-      const originalFindUniqueAvail = prisma.peerAvailability.findUnique;
+    it("should transition MATCHED -> ACTIVE and set startedAt when User B joins afterward", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
 
-      prisma.user.findUnique = (async () => ({ id: "u-1", firebaseUid: "fb-uid-1" })) as unknown as typeof prisma.user.findUnique;
-      prisma.peerAvailability.updateMany = (async () => ({ count: 0 })) as unknown as typeof prisma.peerAvailability.updateMany;
-      prisma.peerAvailability.findUnique = (async () => ({
-        id: "avail-1",
-        userId: "u-1",
-        status: "CANCELLED",
-      })) as unknown as typeof prisma.peerAvailability.findUnique;
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
+      const match = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert(match);
 
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .delete("/api/v1/peer/availability/avail-1")
-          .set("Authorization", "Bearer token-user-1");
+      // Step 1: User A joins (numParticipants = 1)
+      const bodyA = JSON.stringify({
+        event: "participant_joined",
+        room: { name: match.livekitRoom, numParticipants: 1 },
+        participant: { identity: `peer_${matchId}_a` },
+      });
+      const tokenA = await signLiveKitWebhook(bodyA);
+      await request(app)
+        .post("/api/v1/webhooks/livekit")
+        .set("Content-Type", "application/webhook+json")
+        .set("Authorization", tokenA)
+        .send(bodyA);
 
-        assert.strictEqual(response.status, 200);
-        assert.strictEqual(response.body.success, true);
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerAvailability.updateMany = originalUpdateMany;
-        prisma.peerAvailability.findUnique = originalFindUniqueAvail;
-      }
+      let currentMatch = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert.strictEqual(currentMatch?.status, "MATCHED");
+      assert.strictEqual(currentMatch?.startedAt, null);
+
+      // Step 2: User B joins (numParticipants = 2)
+      const bodyB = JSON.stringify({
+        event: "participant_joined",
+        room: { name: match.livekitRoom, numParticipants: 2 },
+        participant: { identity: `peer_${matchId}_b` },
+      });
+      const tokenB = await signLiveKitWebhook(bodyB);
+      await request(app)
+        .post("/api/v1/webhooks/livekit")
+        .set("Content-Type", "application/webhook+json")
+        .set("Authorization", tokenB)
+        .send(bodyB);
+
+      currentMatch = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert.strictEqual(currentMatch?.status, "ACTIVE");
+      assert(currentMatch?.startedAt !== null);
+      assert(currentMatch?.deadlineAt !== null);
+
+      const initialStartedAt = currentMatch?.startedAt;
+
+      // Step 3: Duplicate participant_joined webhook -> startedAt must NOT change
+      const bodyDup = JSON.stringify({
+        event: "participant_joined",
+        room: { name: match.livekitRoom, numParticipants: 2 },
+        participant: { identity: `peer_${matchId}_b` },
+      });
+      const tokenDup = await signLiveKitWebhook(bodyDup);
+      await request(app)
+        .post("/api/v1/webhooks/livekit")
+        .set("Content-Type", "application/webhook+json")
+        .set("Authorization", tokenDup)
+        .send(bodyDup);
+
+      const matchAfterDup = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert.strictEqual(matchAfterDup?.status, "ACTIVE");
+      assert.strictEqual(matchAfterDup?.startedAt?.getTime(), initialStartedAt?.getTime());
     });
 
-    it("should return 404 if availability slot does not exist", async () => {
-      const originalFindUniqueUser = prisma.user.findUnique;
-      const originalUpdateMany = prisma.peerAvailability.updateMany;
-      const originalFindUniqueAvail = prisma.peerAvailability.findUnique;
 
-      prisma.user.findUnique = (async () => ({ id: "u-1", firebaseUid: "fb-uid-1" })) as unknown as typeof prisma.user.findUnique;
-      prisma.peerAvailability.updateMany = (async () => ({ count: 0 })) as unknown as typeof prisma.peerAvailability.updateMany;
-      prisma.peerAvailability.findUnique = (async () => null) as unknown as typeof prisma.peerAvailability.findUnique;
+    it("should mark match CANCELLED and create ZERO ledger rows if User B never joins and User A leaves", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
 
-      try {
-        const app = createApp({ tokenVerifier: mockTokenVerifier });
-        const response = await request(app)
-          .delete("/api/v1/peer/availability/non-existent-avail")
-          .set("Authorization", "Bearer token-user-1");
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
 
-        assert.strictEqual(response.status, 404);
-        assert.strictEqual(response.body.error.code, "AVAILABILITY_NOT_FOUND");
-      } finally {
-        prisma.user.findUnique = originalFindUniqueUser;
-        prisma.peerAvailability.updateMany = originalUpdateMany;
-        prisma.peerAvailability.findUnique = originalFindUniqueAvail;
-      }
+      // Only User A joined; User B never joined. Match is still MATCHED.
+      // Participant A leaves the room
+      await PeerService.finalizeMatchInternal(matchId, "COMPLETED");
+
+      const match = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert.strictEqual(match?.status, "CANCELLED");
+      assert.strictEqual(match?.actualSeconds, 0);
+
+      // Verify ZERO ledger rows created for either user
+      const ledgers = await prisma.usageLedger.findMany({ where: { sessionId: matchId } });
+      assert.strictEqual(ledgers.length, 0);
+    });
+
+    it("should process participant_joined and participant_left webhook events correctly", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
+      const match = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert(match);
+
+      // Verify direct internal lifecycle helper
+      await prisma.peerMatch.update({
+        where: { id: matchId },
+        data: {
+          status: "ACTIVE",
+          startedAt: new Date(Date.now() - 30_000),
+          deadlineAt: new Date(Date.now() + 270_000),
+        },
+      });
+
+      // Simulate participant_left event finalization
+      await PeerService.finalizeMatchInternal(matchId, "COMPLETED");
+
+      const completedMatch = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert.strictEqual(completedMatch?.status, "COMPLETED");
+      assert(completedMatch?.actualSeconds && completedMatch.actualSeconds >= 29);
+
+      const ledgers = await prisma.usageLedger.findMany({ where: { sessionId: matchId } });
+      assert.strictEqual(ledgers.length, 2);
+    });
+
+    it("should calculate explicit allowedSeconds: Free (300s) + Premium (1800s) -> allowedSeconds = 300", async () => {
+      // Set userB as PREMIUM (1800s daily quota)
+      await prisma.user.update({
+        where: { id: userB.id },
+        data: { plan: "PREMIUM" },
+      });
+
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      // User A (Free, 300s remaining) + User B (Premium, 1800s remaining)
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+
+      assert.strictEqual(matchRes.status, 200);
+      assert.strictEqual(matchRes.body.data.match.allowedSeconds, 300);
+    });
+
+    it("should calculate explicit allowedSeconds: Premium (1800s) + Premium (1800s) -> allowedSeconds = 900 (max cap)", async () => {
+      // Set both users as PREMIUM
+      await prisma.user.update({
+        where: { id: userA.id },
+        data: { plan: "PREMIUM" },
+      });
+      await prisma.user.update({
+        where: { id: userB.id },
+        data: { plan: "PREMIUM" },
+      });
+
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+
+      assert.strictEqual(matchRes.status, 200);
+      assert.strictEqual(matchRes.body.data.match.allowedSeconds, 900);
+    });
+
+    it("should handle webhook idempotency: duplicate events create exactly 2 UsageLedger rows total", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-a");
+      const matchRes = await request(app).post("/api/v1/peer/matchmaking/join").set("Authorization", "Bearer token-user-b");
+      const matchId = matchRes.body.data.match.id;
+
+      // Set active with startedAt 45s ago
+      const fortyFiveAgo = new Date(Date.now() - 45_000);
+      await prisma.peerMatch.update({
+        where: { id: matchId },
+        data: {
+          status: "ACTIVE",
+          startedAt: fortyFiveAgo,
+          deadlineAt: new Date(fortyFiveAgo.getTime() + 300_000),
+        },
+      });
+
+      // 1. First participant_left
+      await PeerService.finalizeMatchInternal(matchId, "COMPLETED");
+
+      // 2. Second duplicate participant_left
+      await PeerService.finalizeMatchInternal(matchId, "COMPLETED");
+
+      // 3. Subsequent room_finished
+      await PeerService.finalizeMatchInternal(matchId, "COMPLETED");
+
+      const ledgers = await prisma.usageLedger.findMany({ where: { sessionId: matchId } });
+      assert.strictEqual(ledgers.length, 2);
+
+      const match = await prisma.peerMatch.findUnique({ where: { id: matchId } });
+      assert.strictEqual(match?.status, "COMPLETED");
+      assert(match?.actualSeconds && match.actualSeconds >= 44 && match.actualSeconds <= 46);
+    });
+
+    it("should reject LiveKit webhook with invalid signature with 401 INVALID_WEBHOOK_SIGNATURE", async () => {
+      const app = createApp({ tokenVerifier: mockTokenVerifier });
+
+      const res = await request(app)
+        .post("/api/v1/webhooks/livekit")
+        .set("Content-Type", "application/webhook+json")
+        .set("Authorization", "invalid-token-signature")
+        .send(JSON.stringify({ event: "participant_joined" }));
+
+      assert.strictEqual(res.status, 401);
+      assert.strictEqual(res.body.error.code, "INVALID_WEBHOOK_SIGNATURE");
     });
   });
 });
+
+
+
+

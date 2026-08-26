@@ -637,110 +637,71 @@ export interface PeerAvailabilityData {
 
 export interface PeerMatchDetails {
   id: string;
-  startsAt: string;
-  durationMinutes: number;
-  status: "SCHEDULED" | "ACTIVE" | "COMPLETED" | "MISSED" | "CANCELLED";
+  livekitRoom: string;
+  allowedSeconds: number;
+  status: "MATCHED" | "ACTIVE" | "COMPLETED" | "CANCELLED" | "EXPIRED";
   role: "A" | "B";
-  scenario: {
-    id: string;
-    title: string;
-    category: string;
-    initialQuestion: string;
-  };
   partner: {
     label: string;
   };
 }
 
-export interface PeerBookingResponse {
-  status: "WAITING" | "MATCHED";
-  availability?: PeerAvailabilityData;
+export interface PeerQueueStatusResponse {
+  status: "SEARCHING" | "MATCHED" | "TIMEOUT";
+  queueEntryId?: string;
+  expiresAt?: string;
   match?: PeerMatchDetails;
-}
-
-export interface UpcomingMatchResponse {
-  status?: "MATCHED";
-  match: PeerMatchDetails | null;
-  pendingAvailability: PeerAvailabilityData | null;
 }
 
 export interface PeerTokenData {
   serverUrl: string;
   participantToken: string;
-  match: {
-    id: string;
-    role: "A" | "B";
-    durationMinutes: number;
-    scenario: {
-      id: string;
-      title: string;
-      category: string;
-      initialQuestion: string;
-    };
-  };
+  roomName: string;
+  participantIdentity: string;
+  allowedSeconds: number;
+  status: string;
 }
 
-export async function getPeerSlots(idToken: string): Promise<PeerSlot[]> {
+export async function joinPeerQueue(idToken: string): Promise<PeerQueueStatusResponse> {
   const apiBaseUrl = requireEnv(process.env.EXPO_PUBLIC_API_URL, "EXPO_PUBLIC_API_URL");
-  const response = await fetch(`${apiBaseUrl}/peer/slots`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-    },
-  });
-  const json: ApiResponse<{ slots: PeerSlot[] }> = await response.json();
-  if (!response.ok || !json.success || !json.data) {
-    throw new Error(json.error?.message || "Failed to fetch scheduled peer slots.");
-  }
-  return json.data.slots;
-}
-
-export async function bookPeerAvailability(idToken: string, startAt: string): Promise<PeerBookingResponse> {
-  const apiBaseUrl = requireEnv(process.env.EXPO_PUBLIC_API_URL, "EXPO_PUBLIC_API_URL");
-  const response = await fetch(`${apiBaseUrl}/peer/availability`, {
+  const response = await fetch(`${apiBaseUrl}/peer/matchmaking/join`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`,
     },
-    body: JSON.stringify({ startAt }),
   });
-  const json: ApiResponse<PeerBookingResponse> = await response.json();
+  const json: ApiResponse<PeerQueueStatusResponse> = await response.json();
   if (!response.ok || !json.success || !json.data) {
-    throw new Error(json.error?.message || "Failed to book peer availability.");
+    throw new Error(json.error?.message || "Failed to enter matchmaking queue.");
   }
   return json.data;
 }
 
-export async function cancelPeerAvailability(idToken: string, availabilityId: string): Promise<void> {
+export async function getPeerQueueStatus(idToken: string): Promise<PeerQueueStatusResponse> {
   const apiBaseUrl = requireEnv(process.env.EXPO_PUBLIC_API_URL, "EXPO_PUBLIC_API_URL");
-  const response = await fetch(`${apiBaseUrl}/peer/availability/${availabilityId}`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${idToken}`,
-    },
-  });
-  const json: ApiResponse<{ success: boolean }> = await response.json();
-  if (!response.ok || !json.success) {
-    throw new Error(json.error?.message || "Failed to cancel availability.");
-  }
-}
-
-export async function getUpcomingPeerMatch(idToken: string): Promise<UpcomingMatchResponse> {
-  const apiBaseUrl = requireEnv(process.env.EXPO_PUBLIC_API_URL, "EXPO_PUBLIC_API_URL");
-  const response = await fetch(`${apiBaseUrl}/peer/matches/upcoming`, {
+  const response = await fetch(`${apiBaseUrl}/peer/matchmaking/status`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`,
     },
   });
-  const json: ApiResponse<UpcomingMatchResponse> = await response.json();
+  const json: ApiResponse<PeerQueueStatusResponse> = await response.json();
   if (!response.ok || !json.success || !json.data) {
-    throw new Error(json.error?.message || "Failed to fetch upcoming peer match.");
+    throw new Error(json.error?.message || "Failed to poll queue status.");
   }
   return json.data;
+}
+
+export async function leavePeerQueue(idToken: string): Promise<void> {
+  const apiBaseUrl = requireEnv(process.env.EXPO_PUBLIC_API_URL, "EXPO_PUBLIC_API_URL");
+  await fetch(`${apiBaseUrl}/peer/matchmaking/leave`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
 }
 
 export async function getPeerMatchToken(idToken: string, matchId: string): Promise<PeerTokenData> {
@@ -802,6 +763,7 @@ export async function blockPeerPartner(idToken: string, matchId: string): Promis
     throw new Error(json.error?.message || "Failed to block partner.");
   }
 }
+
 
 export interface VoiceSessionData {
   sessionId: string;

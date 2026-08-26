@@ -5,6 +5,7 @@ import { AppError } from "../middleware/error.middleware.js";
 export interface GeneratePeerTokenParams {
   matchId: string;
   role: "A" | "B";
+  roomName?: string;
   ttlSeconds?: number;
 }
 
@@ -34,9 +35,10 @@ export async function generatePeerRoomToken(
   }
 
   // Match-scoped opaque identifiers (zero PII)
-  const roomName = `peer_${params.matchId}`;
+  const roomName = params.roomName || `peer_${params.matchId}`;
   const participantIdentity = `peer_${params.matchId}_${params.role.toLowerCase()}`;
   const ttl = params.ttlSeconds || 20 * 60; // 20 minutes
+
 
   const at = new AccessToken(apiKey, apiSecret, {
     identity: participantIdentity,

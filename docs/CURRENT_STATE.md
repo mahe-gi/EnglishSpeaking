@@ -3,46 +3,45 @@
 Last updated: August 26, 2026
 
 ### Current milestone
-Ntalo V2 — Phase 2 Realtime AI Voice Agent POC (Physical Android Acceptance Complete)
+Ntalo V2 — Phase 3 Instant Peer Practice Matching (Physical Runtime Acceptance Complete)
 
 ## Completed
 
-- **Ntalo V2: Phase 2 — Realtime AI Voice Agent POC Complete:**
-  - **Standalone Agent Worker (`agent/`):**
-    - Node.js/TypeScript LiveKit Agent worker with pinned dependencies (`@livekit/agents@1.7.0`, `@livekit/agents-plugin-sarvam@1.7.0`, `@livekit/agents-plugin-openai@1.7.0`, `@livekit/agents-plugin-silero@1.7.0`).
-    - Integrated Silero VAD for voice activity detection.
-    - Integrated LiveKit `TurnDetector` for end-of-utterance and conversational turn detection.
-    - Sarvam Saaras STT (`saaras:v3`, `en-IN`, streaming transcribe mode).
-    - Sarvam 105B Conversations LLM (`sarvam-105b-conversations` via OpenAI-compatible endpoint).
-    - Sarvam Bulbul TTS (`bulbul:v3`, `en-IN`, `shubh`, streaming progressive audio synthesis).
-    - Internal worker authentication using `AGENT_INTERNAL_SECRET` (`Bearer <secret>`).
-    - Enforced hard session deadline and server-authoritative finalization.
-  - **Backend Voice Session & Atomic Entitlements (`backend/`):**
-    - `POST /api/v1/voice/sessions`: Serialized atomic reservation, idempotency deduplication with caller ownership validation, LiveKit `AccessToken` generation with `RoomAgentDispatch` (`ntalo-voice-poc`).
-    - `POST /api/v1/internal/voice-sessions/:id/active`: Internal endpoint to transition session to `ACTIVE` once user and agent are present.
-    - `POST /api/v1/internal/voice-sessions/:id/complete`: Internal endpoint to finalize session and record `UsageLedger` row (`idempotencyKey: voice:<sessionId>`) exactly once.
-    - Added `roomName String? @unique` to `VoiceSession` in Prisma schema with applied migration.
-    - 115/115 backend unit and integration tests passing.
-  - **Mobile Realtime WebRTC Client (`mobile/app/voice.tsx`):**
-    - Live WebRTC room connection using `@livekit/react-native` and `livekit-client`.
-    - Realtime agent state tracking (`Connecting...`, `Listening...`, `Speaking...`, `Thinking...`).
-    - Live timer showing elapsed and quota seconds.
-    - Microphone mute/unmute toggle.
-    - `✕` exit button with graceful room and audio session teardown.
-  - **Physical Android Runtime Acceptance (`9XPBUS7XM7CI6X9L`):**
-    - Phone joins LiveKit room: PASS
-    - Agent joins via RoomAgentDispatch: PASS
-    - AI opening greeting delivered: PASS
-    - Realtime speech recognition (Saaras v3): PASS
-    - Conversational LLM turn generation (Sarvam 105B): PASS
-    - Progressive streaming TTS (Bulbul v3): PASS
-    - Conversational turns: PASS
-    - Turn detection & basic barge-in: PASS
-    - Mute/Unmute track toggle: PASS
-    - `✕` exit button clean teardown: PASS
-    - Automatic hard deadline enforcement: PASS
-    - Backend lifecycle finalization & exact-once UsageLedger: PASS
-    - Zero raw Ntalo audio persistence: PASS
+- **Ntalo V2: Phase 3 — Instant Peer Practice Matching & Realtime WebRTC Calls Complete:**
+  - **Matchmaking Engine & SERIALIZABLE Transactions (`backend/src/modules/peer/`):**
+    - `POST /api/v1/peer/matchmaking/join`: Atomic `SERIALIZABLE` queue pairing engine preventing duplicate matches, self-pairing, and race conditions.
+    - Strict Registered User + 18+ Age Confirmation guards.
+    - Quota-aware duration negotiation: `allowedSeconds = min(remainingA, remainingB, 900)`.
+    - Directional blocking and bidirectional rematch prevention ($A \rightarrow B$ or $B \rightarrow A$).
+    - Match-scoped opaque participant tokens (`peer_<matchId>_a`, `peer_<matchId>_b`).
+    - 45s search TTL with clean status reporting (`SEARCHING`, `MATCHED`, `TIMEOUT`, `CANCELLED`).
+  - **Authoritative LiveKit Webhooks & Usage Settlement (`backend/src/modules/peer/`):**
+    - Raw-body middleware with verified `WebhookReceiver` cryptographic signature check.
+    - Single participant connect remains `MATCHED` (`startedAt = null`, `deadlineAt = null`, no billing).
+    - Transition to `ACTIVE` with server `startedAt` occurs strictly when both participants connect.
+    - Webhook idempotency: repeated delivery preserves original `startedAt`.
+    - Single participant unbilled exit: transitions to `CANCELLED` with 0 billed seconds and 0 ledger rows.
+    - Session leave: server transitions to `COMPLETED`, setting `endedAt`, calculating `actualSeconds`, and creating exactly TWO `UsageLedger` rows with `idempotencyKey = peer:<matchId>:<userId>`.
+  - **Moderation & Safety (`reports` & `blocks`):**
+    - `POST /api/v1/peer/matches/:id/report`: Server resolves `reportedUserId` from match. Report alone does not block.
+    - `POST /api/v1/peer/matches/:id/block`: Directional block created, immediately terminating rematchability.
+  - **Mobile Peer Practice Experience (`mobile/app/(peer)/`):**
+    - Matchmaking radar & search timeout screen with retry & AI fallback.
+    - Realtime WebRTC audio call screen via `@livekit/react-native` and `livekit-client`.
+    - Connection states: `Connecting...`, `Waiting for partner...`, `Live Call`, `Partner disconnected`.
+    - Live countdown timer, microphone mute/unmute, Safety & Moderation modal, and End Call.
+  - **Two-User Physical Android Acceptance (`9XPBUS7XM7CI6X9L` + Second Client):**
+    - User A (physical Android) joins queue $\rightarrow$ `SEARCHING`: PASS
+    - User B joins $\rightarrow$ atomic pairing into single `PeerMatch`: PASS
+    - Single participant waiting $\rightarrow$ `MATCHED`, `startedAt = null`, no billing: PASS
+    - Second participant connects $\rightarrow$ genuine WebRTC activation $\rightarrow$ `ACTIVE`: PASS
+    - Live bidirectional audio exchange: PASS
+    - Mute/Unmute microphone toggle: PASS
+    - Report partner $\rightarrow$ server-resolved Report row without block: PASS
+    - Block partner $\rightarrow$ Block row created and rematch blocked in both directions: PASS
+    - Leave call $\rightarrow$ `COMPLETED`, exact duration, and 2 `UsageLedger` rows: PASS
+    - 124/124 backend tests passing, 0 TypeScript errors across backend & mobile.
+
 
 - **Ntalo V2: Phase 0 & Phase 1 — Guest-First Architecture & P0/P1 Hardening:**
   - P0-1 Auth Merge Security Bypass Fixed.
@@ -53,11 +52,12 @@ Ntalo V2 — Phase 2 Realtime AI Voice Agent POC (Physical Android Acceptance Co
   - P1-5 Personalization Standalone Flow.
 
 ## Currently working on
-Phase 2 Realtime AI Voice Agent POC Physical Acceptance Complete. Ready for Phase 3.
+Phase 3 Instant Peer Practice Matching Physical Acceptance Complete. Ready for Phase 4 (Progress, Feedback & Profile).
 
 ## Next exact task
-1. Await user review of Phase 2 Physical Acceptance Report.
-2. Next Phase: Phase 3 (Instant Peer Practice Matching & LiveKit Audio Call).
+1. Await user review of Phase 3 Two-User Physical Acceptance Report.
+2. Begin Phase 4: Progress, Practice History & Profile Insights.
+
 
 Do not implement:
 - LiveKit video calls, screen sharing, group calls
@@ -93,7 +93,7 @@ None.
 - `docs/CURRENT_STATE.md`
 
 ## Last verified commands
-- `backend`: `npm test` (117 tests passing across 27 suites), `npx prisma validate`, `npx prisma migrate status`, `npm run typecheck`, `npm run lint`
+- `backend`: `npm test` (124 tests passing across 28 suites), `npx prisma validate`, `npx prisma migrate status`, `npm run typecheck`, `npm run lint`
 - `agent`: `npm run typecheck`, `npm run lint`
 - `mobile`: `npm run typecheck`, `npm run lint`
 - `web`: `npm run typecheck`, `npm run lint`, `npm run build`

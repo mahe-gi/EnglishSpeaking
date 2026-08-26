@@ -1,40 +1,36 @@
+import { WebhookReceiver, RoomServiceClient } from "livekit-server-sdk";
 import { prisma } from "../../lib/prisma.js";
 import { AuthContext } from "../../types/express.js";
+
 import { AppError } from "../../middleware/error.middleware.js";
-import { getUpcomingPeerSlots, isValidPeerSlot } from "./peer-slots.js";
-import { PRACTICE_SCENARIOS } from "../practice/practice-scenarios.js";
+import { calculateEntitlements } from "../users/entitlement.service.js";
+import { ENTITLEMENT_LIMITS } from "../../config/entitlements.config.js";
 import { generatePeerRoomToken, GeneratePeerTokenFunction } from "../../services/livekit.service.js";
+import { env } from "../../config/env.js";
 
-// Deterministic scenario selection based on match ID
-function getScenarioForMatch(matchId: string) {
-  let hash = 0;
-  for (let i = 0; i < matchId.length; i++) {
-    hash = (hash << 5) - hash + matchId.charCodeAt(i);
-    hash |= 0;
-  }
-  const index = Math.abs(hash) % PRACTICE_SCENARIOS.length;
-  const s = PRACTICE_SCENARIOS[index]!;
-  return {
-    id: s.id,
-    title: s.title,
-    category: s.category,
-    initialQuestion: s.initialQuestion,
-  };
-}
-
-function formatMatchResult(match: { id: string; userAId: string; userBId: string; startsAt: Date; status: string; livekitRoom: string }, currentUserId: string) {
+function formatMatchResult(
+  match: {
+    id: string;
+    userAId: string;
+    userBId: string;
+    status: string;
+    livekitRoom: string;
+    allowedSeconds: number;
+    matchedAt: Date;
+    startedAt: Date | null;
+  },
+  currentUserId: string
+) {
   const role: "A" | "B" = match.userAId === currentUserId ? "A" : "B";
-  const scenario = getScenarioForMatch(match.id);
 
   return {
     status: "MATCHED" as const,
     match: {
       id: match.id,
-      startsAt: match.startsAt.toISOString(),
-      durationMinutes: 15,
+      livekitRoom: match.livekitRoom,
+      allowedSeconds: match.allowedSeconds,
       status: match.status,
       role,
-      scenario,
       partner: {
         label: "Practice Partner",
       },
@@ -42,589 +38,712 @@ function formatMatchResult(match: { id: string; userAId: string; userBId: string
   };
 }
 
-export async function getSlots(auth: AuthContext) {
-  const user = await prisma.user.findUnique({
-    where: { firebaseUid: auth.uid },
-    include: { profile: true },
-  });
-
-  if (!user) {
-    const error: AppError = new Error("User record not found.");
-    error.statusCode = 404;
-    error.code = "USER_NOT_FOUND";
-    throw error;
-  }
-
-  const slots = getUpcomingPeerSlots();
-  return { slots };
-}
-
-export async function bookAvailability(auth: AuthContext, startAtISO: string) {
-  const user = await prisma.user.findUnique({
-    where: { firebaseUid: auth.uid },
-    include: { profile: true },
-  });
-
-  if (!user) {
-    const error: AppError = new Error("User record not found.");
-    error.statusCode = 404;
-    error.code = "USER_NOT_FOUND";
-    throw error;
-  }
-
-  if (!user.profile || user.profile.baselineScore === null) {
-    const error: AppError = new Error("Baseline speaking assessment must be completed before booking peer practice.");
-    error.statusCode = 409;
-    error.code = "ASSESSMENT_REQUIRED";
-    throw error;
-  }
-
-  if (user.profile.goal !== "JOB_INTERVIEWS") {
-    const error: AppError = new Error("Peer practice is currently available for Job Interview preparation.");
-    error.statusCode = 409;
-    error.code = "INELIGIBLE_GOAL";
-    throw error;
-  }
-
-  if (!isValidPeerSlot(startAtISO)) {
-    const error: AppError = new Error("Invalid or expired scheduled slot.");
-    error.statusCode = 400;
-    error.code = "INVALID_SLOT";
-    throw error;
-  }
-
-  const slotDate = new Date(startAtISO);
-  const userScore = user.profile.baselineScore;
-  const userCareer = user.profile.careerStatus || "JOB_SEEKER";
-
-  // Check if user already has an active match for this slot
-  const existingActiveMatch = await prisma.peerMatch.findFirst({
-    where: {
-      startsAt: slotDate,
-      status: { in: ["SCHEDULED", "ACTIVE"] },
-      OR: [{ userAId: user.id }, { userBId: user.id }],
-    },
-  });
-
-  if (existingActiveMatch) {
-    return formatMatchResult(existingActiveMatch, user.id);
-  }
-
-  // Attempt matching inside a Serializable transaction with bounded retries
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const result = await prisma.$transaction(
-        async (tx) => {
-          // Check existing availability for this slot
-          const existingAvail = await tx.peerAvailability.findUnique({
-            where: {
-              userId_startsAt: {
-                userId: user.id,
-                startsAt: slotDate,
-              },
-            },
-          });
-
-          if (existingAvail && existingAvail.status === "MATCHED") {
-            const match = await tx.peerMatch.findFirst({
-              where: {
-                startsAt: slotDate,
-                status: { in: ["SCHEDULED", "ACTIVE"] },
-                OR: [{ userAId: user.id }, { userBId: user.id }],
-              },
-            });
-            if (match) {
-              return formatMatchResult(match, user.id);
-            }
-          }
-
-          if (existingAvail && existingAvail.status === "AVAILABLE") {
-            return {
-              status: "WAITING" as const,
-              availability: {
-                id: existingAvail.id,
-                startsAt: existingAvail.startsAt.toISOString(),
-                status: existingAvail.status,
-              },
-            };
-          }
-
-          // Search for candidate availabilities
-          const candidates = await tx.peerAvailability.findMany({
-            where: {
-              startsAt: slotDate,
-              status: "AVAILABLE",
-              userId: { not: user.id },
-              user: {
-                profile: {
-                  baselineScore: { not: null },
-                  goal: "JOB_INTERVIEWS",
-                },
-              },
-            },
-            include: {
-              user: {
-                include: { profile: true },
-              },
-            },
-          });
-
-          // Bidirectional block filter
-          const eligibleCandidates = [];
-          for (const cand of candidates) {
-            const blocked = await tx.block.findFirst({
-              where: {
-                OR: [
-                  { blockerId: user.id, blockedUserId: cand.userId },
-                  { blockerId: cand.userId, blockedUserId: user.id },
-                ],
-              },
-            });
-            if (!blocked) {
-              eligibleCandidates.push(cand);
-            }
-          }
-
-          if (eligibleCandidates.length > 0) {
-            // Rank candidates: 1. same careerStatus, 2. closest baselineScore, 3. oldest availability
-            eligibleCandidates.sort((a, b) => {
-              const aCareerMatch = a.user.profile?.careerStatus === userCareer ? 0 : 1;
-              const bCareerMatch = b.user.profile?.careerStatus === userCareer ? 0 : 1;
-              if (aCareerMatch !== bCareerMatch) return aCareerMatch - bCareerMatch;
-
-              const aScoreDiff = Math.abs((a.user.profile?.baselineScore || 50) - userScore);
-              const bScoreDiff = Math.abs((b.user.profile?.baselineScore || 50) - userScore);
-              if (aScoreDiff !== bScoreDiff) return aScoreDiff - bScoreDiff;
-
-              return a.createdAt.getTime() - b.createdAt.getTime();
-            });
-
-            const bestCandidate = eligibleCandidates[0]!;
-
-            // Claim candidate availability
-            const claimCandidate = await tx.peerAvailability.updateMany({
-              where: {
-                id: bestCandidate.id,
-                status: "AVAILABLE",
-              },
-              data: {
-                status: "MATCHED",
-              },
-            });
-
-            if (claimCandidate.count !== 1) {
-              throw new Error("CANDIDATE_CLAIM_CONFLICT");
-            }
-
-            // Create/update own availability to MATCHED
-            await tx.peerAvailability.upsert({
-              where: {
-                userId_startsAt: {
-                  userId: user.id,
-                  startsAt: slotDate,
-                },
-              },
-              create: {
-                userId: user.id,
-                startsAt: slotDate,
-                goal: "JOB_INTERVIEWS",
-                level: String(userScore),
-                status: "MATCHED",
-              },
-              update: {
-                status: "MATCHED",
-              },
-            });
-
-            // Create PeerMatch
-            const uniqueRoom = `peer_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-            const match = await tx.peerMatch.create({
-              data: {
-                userAId: bestCandidate.userId, // older availability is Learner A
-                userBId: user.id,              // new joiner is Learner B
-                startsAt: slotDate,
-                status: "SCHEDULED",
-                livekitRoom: uniqueRoom,
-              },
-            });
-
-            return formatMatchResult(match, user.id);
-          }
-
-          // No candidate available -> create own AVAILABLE slot
-          const availability = await tx.peerAvailability.upsert({
-            where: {
-              userId_startsAt: {
-                userId: user.id,
-                startsAt: slotDate,
-              },
-            },
-            create: {
-              userId: user.id,
-              startsAt: slotDate,
-              goal: "JOB_INTERVIEWS",
-              level: String(userScore),
-              status: "AVAILABLE",
-            },
-            update: {
-              status: "AVAILABLE",
-            },
-          });
-
-          return {
-            status: "WAITING" as const,
-            availability: {
-              id: availability.id,
-              startsAt: availability.startsAt.toISOString(),
-              status: availability.status,
-            },
-          };
-        },
-        { isolationLevel: "Serializable" }
-      );
-
-      return result;
-    } catch (err: unknown) {
-      if (attempt === 3) throw err;
-      await new Promise((r) => setTimeout(r, 50 * attempt));
-    }
-  }
-
-  throw new Error("Failed to book slot after retries.");
-}
-
-export async function cancelAvailability(auth: AuthContext, availabilityId: string) {
-  const user = await prisma.user.findUnique({
-    where: { firebaseUid: auth.uid },
-  });
-
-  if (!user) {
-    const error: AppError = new Error("User record not found.");
-    error.statusCode = 404;
-    error.code = "USER_NOT_FOUND";
-    throw error;
-  }
-
-  // Atomically cancel if currently AVAILABLE
-  const cancelled = await prisma.peerAvailability.updateMany({
-    where: {
-      id: availabilityId,
-      userId: user.id,
-      status: "AVAILABLE",
-    },
-    data: {
-      status: "CANCELLED",
-    },
-  });
-
-  if (cancelled.count === 1) {
-    return { success: true };
-  }
-
-  // If count === 0, inspect current state to return accurate error or idempotent success
-  const current = await prisma.peerAvailability.findUnique({
-    where: { id: availabilityId },
-  });
-
-  if (!current || current.userId !== user.id) {
-    const error: AppError = new Error("Availability slot not found.");
-    error.statusCode = 404;
-    error.code = "AVAILABILITY_NOT_FOUND";
-    throw error;
-  }
-
-  if (current.status === "MATCHED") {
-    const error: AppError = new Error("Cannot cancel availability once matched with a partner.");
-    error.statusCode = 409;
-    error.code = "MATCHED_CANNOT_CANCEL_AVAILABILITY";
-    throw error;
-  }
-
-  if (current.status === "CANCELLED") {
-    return { success: true }; // Idempotent success
-  }
-
-  const error: AppError = new Error(`Cannot cancel availability with status ${current.status}.`);
-  error.statusCode = 409;
-  error.code = "INVALID_SLOT_STATE";
-  throw error;
-}
-
-export async function getUpcomingMatch(auth: AuthContext) {
-  const user = await prisma.user.findUnique({
-    where: { firebaseUid: auth.uid },
-  });
-
-  if (!user) {
-    const error: AppError = new Error("User record not found.");
-    error.statusCode = 404;
-    error.code = "USER_NOT_FOUND";
-    throw error;
-  }
-
-  const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-
-  const match = await prisma.peerMatch.findFirst({
-    where: {
-      status: { in: ["SCHEDULED", "ACTIVE"] },
-      startsAt: { gte: fifteenMinutesAgo },
-      OR: [{ userAId: user.id }, { userBId: user.id }],
-    },
-    orderBy: {
-      startsAt: "asc",
-    },
-  });
-
-  if (!match) {
-    // Check if user has an active pending availability
-    const pendingAvail = await prisma.peerAvailability.findFirst({
-      where: {
-        userId: user.id,
-        status: "AVAILABLE",
-        startsAt: { gte: new Date() },
-      },
-      orderBy: { startsAt: "asc" },
+export class PeerService {
+  /**
+   * Enters the instant matchmaking queue or immediately pairs with a waiting candidate.
+   */
+  static async joinQueue(auth: AuthContext) {
+    const user = await prisma.user.findUnique({
+      where: { firebaseUid: auth.uid },
     });
 
-    return {
-      match: null,
-      pendingAvailability: pendingAvail
-        ? {
-            id: pendingAvail.id,
-            startsAt: pendingAvail.startsAt.toISOString(),
-            status: pendingAvail.status,
-          }
-        : null,
-    };
-  }
+    if (!user) {
+      const error: AppError = new Error("User record not found.");
+      error.statusCode = 404;
+      error.code = "USER_NOT_FOUND";
+      throw error;
+    }
 
-  return {
-    ...formatMatchResult(match, user.id),
-    pendingAvailability: null,
-  };
-}
+    // Safety Invariant: strictly REGISTERED users only
+    if (user.identityType !== "REGISTERED") {
+      const error: AppError = new Error("Google sign-in is required for peer practice.");
+      error.statusCode = 403;
+      error.code = "REGISTERED_IDENTITY_REQUIRED";
+      throw error;
+    }
 
-export async function getMatchToken(
-  auth: AuthContext,
-  matchId: string,
-  tokenGenerator: GeneratePeerTokenFunction = generatePeerRoomToken
-) {
-  const user = await prisma.user.findUnique({
-    where: { firebaseUid: auth.uid },
-  });
+    // Safety Invariant: 18+ age confirmed
+    if (!user.peerAgeConfirmedAt) {
+      const error: AppError = new Error("18+ age confirmation is required before entering peer practice.");
+      error.statusCode = 403;
+      error.code = "AGE_CONFIRMATION_REQUIRED";
+      throw error;
+    }
 
-  if (!user) {
-    const error: AppError = new Error("User record not found.");
-    error.statusCode = 404;
-    error.code = "USER_NOT_FOUND";
-    throw error;
-  }
+    // Entitlement verification
+    const entitlements = await calculateEntitlements(user);
+    if (entitlements.remainingPeerSeconds <= 0) {
+      const error: AppError = new Error("Your daily peer practice allowance has been exhausted.");
+      error.statusCode = 403;
+      error.code = "ENTITLEMENT_EXHAUSTED";
+      throw error;
+    }
 
-  const match = await prisma.peerMatch.findUnique({
-    where: { id: matchId },
-  });
-
-  if (!match || (match.userAId !== user.id && match.userBId !== user.id)) {
-    const error: AppError = new Error("Peer match not found.");
-    error.statusCode = 404;
-    error.code = "MATCH_NOT_FOUND";
-    throw error;
-  }
-
-  if (match.status === "CANCELLED" || match.status === "MISSED") {
-    const error: AppError = new Error("This peer match is no longer active.");
-    error.statusCode = 409;
-    error.code = "MATCH_INACTIVE";
-    throw error;
-  }
-
-  const partnerId = match.userAId === user.id ? match.userBId : match.userAId;
-
-  // Bidirectional block check
-  const block = await prisma.block.findFirst({
-    where: {
-      OR: [
-        { blockerId: user.id, blockedUserId: partnerId },
-        { blockerId: partnerId, blockedUserId: user.id },
-      ],
-    },
-  });
-
-  if (block) {
-    const error: AppError = new Error("Cannot join peer call due to safety block.");
-    error.statusCode = 403;
-    error.code = "PARTNER_BLOCKED";
-    throw error;
-  }
-
-  // Join window: 5 minutes before scheduled start through 10 minutes after scheduled start
-  const now = Date.now();
-  const startTime = match.startsAt.getTime();
-  const windowStart = startTime - 5 * 60 * 1000;
-  const windowEnd = startTime + 10 * 60 * 1000;
-
-  if (now < windowStart || now > windowEnd) {
-    const error: AppError = new Error("Join window is currently closed. You can join from 5 minutes before start time.");
-    error.statusCode = 409;
-    error.code = "PEER_JOIN_WINDOW_CLOSED";
-    throw error;
-  }
-
-  const role: "A" | "B" = match.userAId === user.id ? "A" : "B";
-
-  const tokenResult = await tokenGenerator({
-    matchId: match.id,
-    role,
-  });
-
-  return {
-    serverUrl: tokenResult.serverUrl,
-    participantToken: tokenResult.participantToken,
-    match: {
-      id: match.id,
-      role,
-      durationMinutes: 15,
-      scenario: getScenarioForMatch(match.id),
-    },
-  };
-}
-
-export async function completeMatch(auth: AuthContext, matchId: string) {
-  const user = await prisma.user.findUnique({
-    where: { firebaseUid: auth.uid },
-  });
-
-  if (!user) {
-    const error: AppError = new Error("User record not found.");
-    error.statusCode = 404;
-    error.code = "USER_NOT_FOUND";
-    throw error;
-  }
-
-  const match = await prisma.peerMatch.findUnique({
-    where: { id: matchId },
-  });
-
-  if (!match || (match.userAId !== user.id && match.userBId !== user.id)) {
-    const error: AppError = new Error("Peer match not found.");
-    error.statusCode = 404;
-    error.code = "MATCH_NOT_FOUND";
-    throw error;
-  }
-
-  const sessionEndTime = match.startsAt.getTime() + 15 * 60 * 1000;
-  const now = Date.now();
-
-  // If user leaves early before session end time, do NOT terminate the shared match for the other partner
-  if (now < sessionEndTime) {
-    return {
-      matchId: match.id,
-      status: match.status,
-      message: "Device disconnected from peer call.",
-    };
-  }
-
-  // At or after scheduled session end, idempotently finalize the shared match
-  const updated = await prisma.peerMatch.update({
-    where: { id: matchId },
-    data: {
-      status: "COMPLETED",
-      completedAt: match.completedAt || new Date(),
-    },
-  });
-
-  return {
-    matchId: updated.id,
-    status: updated.status,
-  };
-}
-
-export async function reportPartner(
-  auth: AuthContext,
-  matchId: string,
-  reason: string,
-  details?: string
-) {
-  const user = await prisma.user.findUnique({
-    where: { firebaseUid: auth.uid },
-  });
-
-  if (!user) {
-    const error: AppError = new Error("User record not found.");
-    error.statusCode = 404;
-    error.code = "USER_NOT_FOUND";
-    throw error;
-  }
-
-  const match = await prisma.peerMatch.findUnique({
-    where: { id: matchId },
-  });
-
-  if (!match || (match.userAId !== user.id && match.userBId !== user.id)) {
-    const error: AppError = new Error("Peer match not found.");
-    error.statusCode = 404;
-    error.code = "MATCH_NOT_FOUND";
-    throw error;
-  }
-
-  const reportedUserId = match.userAId === user.id ? match.userBId : match.userAId;
-
-  const report = await prisma.report.create({
-    data: {
-      reporterId: user.id,
-      reportedUserId,
-      peerMatchId: match.id,
-      reason,
-      details: details || null,
-    },
-  });
-
-  return {
-    reportId: report.id,
-    success: true,
-  };
-}
-
-export async function blockPartner(auth: AuthContext, matchId: string) {
-  const user = await prisma.user.findUnique({
-    where: { firebaseUid: auth.uid },
-  });
-
-  if (!user) {
-    const error: AppError = new Error("User record not found.");
-    error.statusCode = 404;
-    error.code = "USER_NOT_FOUND";
-    throw error;
-  }
-
-  const match = await prisma.peerMatch.findUnique({
-    where: { id: matchId },
-  });
-
-  if (!match || (match.userAId !== user.id && match.userBId !== user.id)) {
-    const error: AppError = new Error("Peer match not found.");
-    error.statusCode = 404;
-    error.code = "MATCH_NOT_FOUND";
-    throw error;
-  }
-
-  const blockedUserId = match.userAId === user.id ? match.userBId : match.userAId;
-
-  await prisma.block.upsert({
-    where: {
-      blockerId_blockedUserId: {
-        blockerId: user.id,
-        blockedUserId,
+    // Check if user is already in an active non-terminal match
+    const existingActiveMatch = await prisma.peerMatch.findFirst({
+      where: {
+        status: { in: ["MATCHED", "ACTIVE"] },
+        OR: [{ userAId: user.id }, { userBId: user.id }],
       },
-    },
-    create: {
-      blockerId: user.id,
-      blockedUserId,
-    },
-    update: {},
-  });
+    });
 
-  return {
-    success: true,
-  };
+    if (existingActiveMatch) {
+      return formatMatchResult(existingActiveMatch, user.id);
+    }
+
+    // Matchmaking inside SERIALIZABLE transaction with retry loop
+    const maxRetries = 5;
+    let attempt = 0;
+
+    while (attempt < maxRetries) {
+      attempt++;
+      try {
+        const result = await prisma.$transaction(
+          async (tx) => {
+            const now = new Date();
+
+            // Check caller's remaining peer seconds inside the transaction
+            const callerEntitlements = await calculateEntitlements(user, null, tx);
+            if (callerEntitlements.remainingPeerSeconds <= 0) {
+              const error: AppError = new Error("Your daily peer practice allowance has been exhausted.");
+              error.statusCode = 403;
+              error.code = "ENTITLEMENT_EXHAUSTED";
+              throw error;
+            }
+
+            // 1. Check if user already has an active WAITING queue entry
+            const existingQueue = await tx.peerQueueEntry.findUnique({
+              where: { userId: user.id },
+            });
+
+            if (
+              existingQueue &&
+              existingQueue.status === "WAITING" &&
+              existingQueue.expiresAt > now
+            ) {
+              return {
+                status: "SEARCHING" as const,
+                queueEntryId: existingQueue.id,
+                expiresAt: existingQueue.expiresAt.toISOString(),
+              };
+            }
+
+            // 2. Query potential candidates in queue (WAITING, not expired, not self)
+            const candidateEntries = await tx.peerQueueEntry.findMany({
+              where: {
+                status: "WAITING",
+                expiresAt: { gt: now },
+                userId: { not: user.id },
+                user: {
+                  identityType: "REGISTERED",
+                  peerAgeConfirmedAt: { not: null },
+                },
+              },
+              include: {
+                user: true,
+              },
+              orderBy: {
+                createdAt: "asc", // FIFO candidate ordering
+              },
+            });
+
+            // 3. Filter candidates for mutual blocks, active matches, and valid remaining quota
+            for (const cand of candidateEntries) {
+              // Check active match on candidate
+              const candActiveMatch = await tx.peerMatch.findFirst({
+                where: {
+                  status: { in: ["MATCHED", "ACTIVE"] },
+                  OR: [{ userAId: cand.userId }, { userBId: cand.userId }],
+                },
+              });
+              if (candActiveMatch) continue;
+
+              // Check bidirectional block
+              const block = await tx.block.findFirst({
+                where: {
+                  OR: [
+                    { blockerId: user.id, blockedUserId: cand.userId },
+                    { blockerId: cand.userId, blockedUserId: user.id },
+                  ],
+                },
+              });
+              if (block) continue;
+
+              // Compute candidate entitlement inside tx
+              const candEntitlements = await calculateEntitlements(cand.user, null, tx);
+              if (candEntitlements.remainingPeerSeconds <= 0) {
+                continue;
+              }
+
+              // Compute allowedSeconds = min(remainingA, remainingB, PEER_SESSION_MAX_SECONDS)
+              const allowedSeconds = Math.min(
+                callerEntitlements.remainingPeerSeconds,
+                candEntitlements.remainingPeerSeconds,
+                ENTITLEMENT_LIMITS.PEER_SESSION_MAX_SECONDS
+              );
+
+              if (allowedSeconds <= 0) {
+                continue;
+              }
+
+              // Candidate is eligible! Attempt conditional claim
+              const claim = await tx.peerQueueEntry.updateMany({
+                where: {
+                  id: cand.id,
+                  status: "WAITING",
+                  expiresAt: { gt: now },
+                },
+                data: {
+                  status: "MATCHED",
+                },
+              });
+
+              if (claim.count !== 1) {
+                // Contention: candidate claimed by another transaction -> retry loop
+                throw new Error("CANDIDATE_CLAIM_CONTENTION");
+              }
+
+              // Generate unique room identifier
+              const livekitRoom = `peer_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+              // Create PeerMatch with explicit server-calculated allowedSeconds
+              const match = await tx.peerMatch.create({
+                data: {
+                  userAId: cand.userId, // older joiner
+                  userBId: user.id,     // newer joiner
+                  status: "MATCHED",
+                  livekitRoom,
+                  allowedSeconds,
+                  actualSeconds: 0,
+                  matchedAt: now,
+                },
+              });
+
+
+              // Update candidate queue entry with matchId
+              await tx.peerQueueEntry.update({
+                where: { id: cand.id },
+                data: { matchId: match.id },
+              });
+
+              // Upsert caller's queue entry to MATCHED
+              await tx.peerQueueEntry.upsert({
+                where: { userId: user.id },
+                create: {
+                  userId: user.id,
+                  status: "MATCHED",
+                  matchId: match.id,
+                  expiresAt: new Date(now.getTime() + 60_000),
+                },
+                update: {
+                  status: "MATCHED",
+                  matchId: match.id,
+                  expiresAt: new Date(now.getTime() + 60_000),
+                },
+              });
+
+              return formatMatchResult(match, user.id);
+            }
+
+            // 4. No candidate available -> create/upsert caller's own WAITING queue entry (45s TTL)
+            const expiresAt = new Date(now.getTime() + 45_000);
+            const queueEntry = await tx.peerQueueEntry.upsert({
+              where: { userId: user.id },
+              create: {
+                userId: user.id,
+                status: "WAITING",
+                expiresAt,
+                matchId: null,
+              },
+              update: {
+                status: "WAITING",
+                expiresAt,
+                matchId: null,
+              },
+            });
+
+            return {
+              status: "SEARCHING" as const,
+              queueEntryId: queueEntry.id,
+              expiresAt: expiresAt.toISOString(),
+            };
+          },
+          { isolationLevel: "Serializable" }
+        );
+
+        return result;
+      } catch (err: unknown) {
+        if (attempt >= maxRetries) {
+          console.error("[PeerService] Matchmaking contention retries exhausted:", err);
+          throw err;
+        }
+        await new Promise((r) => setTimeout(r, 25 * attempt + Math.random() * 20));
+      }
+    }
+
+    throw new Error("Matchmaking failed after retries.");
+  }
+
+  /**
+   * Bounded short-polling endpoint while in matchmaking queue.
+   */
+  static async getQueueStatus(auth: AuthContext) {
+    const user = await prisma.user.findUnique({
+      where: { firebaseUid: auth.uid },
+    });
+
+    if (!user) {
+      const error: AppError = new Error("User record not found.");
+      error.statusCode = 404;
+      error.code = "USER_NOT_FOUND";
+      throw error;
+    }
+
+    const now = new Date();
+
+    // 1. Check for active non-terminal match
+    const activeMatch = await prisma.peerMatch.findFirst({
+      where: {
+        status: { in: ["MATCHED", "ACTIVE"] },
+        OR: [{ userAId: user.id }, { userBId: user.id }],
+      },
+    });
+
+    if (activeMatch) {
+      return formatMatchResult(activeMatch, user.id);
+    }
+
+    // 2. Check queue entry
+    const queueEntry = await prisma.peerQueueEntry.findUnique({
+      where: { userId: user.id },
+    });
+
+    if (!queueEntry) {
+      return { status: "TIMEOUT" as const };
+    }
+
+    if (queueEntry.status === "MATCHED" && queueEntry.matchId) {
+      const match = await prisma.peerMatch.findUnique({
+        where: { id: queueEntry.matchId },
+      });
+      if (match && ["MATCHED", "ACTIVE"].includes(match.status)) {
+        return formatMatchResult(match, user.id);
+      }
+    }
+
+    if (queueEntry.status === "WAITING" && queueEntry.expiresAt > now) {
+      return {
+        status: "SEARCHING" as const,
+        expiresAt: queueEntry.expiresAt.toISOString(),
+      };
+    }
+
+    return { status: "TIMEOUT" as const };
+  }
+
+  /**
+   * Cancels search and removes caller from matchmaking queue.
+   */
+  static async leaveQueue(auth: AuthContext) {
+    const user = await prisma.user.findUnique({
+      where: { firebaseUid: auth.uid },
+    });
+
+    if (!user) {
+      return { success: true };
+    }
+
+    await prisma.peerQueueEntry.updateMany({
+      where: { userId: user.id, status: "WAITING" },
+      data: { status: "CANCELLED" },
+    });
+
+    return { success: true };
+
+  }
+
+  /**
+   * Generates LiveKit participant token with strict token ownership verification.
+   */
+  static async getMatchToken(
+    auth: AuthContext,
+    matchId: string,
+    tokenGenerator: GeneratePeerTokenFunction = generatePeerRoomToken
+  ) {
+    const user = await prisma.user.findUnique({
+      where: { firebaseUid: auth.uid },
+    });
+
+    if (!user) {
+      const error: AppError = new Error("User record not found.");
+      error.statusCode = 404;
+      error.code = "USER_NOT_FOUND";
+      throw error;
+    }
+
+    const match = await prisma.peerMatch.findUnique({
+      where: { id: matchId },
+    });
+
+    if (!match) {
+      const error: AppError = new Error("Peer match not found.");
+      error.statusCode = 404;
+      error.code = "MATCH_NOT_FOUND";
+      throw error;
+    }
+
+    // Token Ownership: caller MUST be userAId or userBId
+    const isUserA = match.userAId === user.id;
+    const isUserB = match.userBId === user.id;
+
+    if (!isUserA && !isUserB) {
+      const error: AppError = new Error("You are not a participant in this peer match.");
+      error.statusCode = 403;
+      error.code = "MATCH_ACCESS_DENIED";
+      throw error;
+    }
+
+    // Match status validation
+    if (["COMPLETED", "CANCELLED", "EXPIRED", "MISSED"].includes(match.status)) {
+      const error: AppError = new Error("Cannot join a completed or expired peer match.");
+      error.statusCode = 409;
+      error.code = "MATCH_NOT_ACTIVE";
+      throw error;
+    }
+
+    const role: "A" | "B" = isUserA ? "A" : "B";
+    const tokenResult = await tokenGenerator({
+      matchId: match.id,
+      role,
+      roomName: match.livekitRoom,
+      ttlSeconds: match.allowedSeconds + 180,
+    });
+
+
+    return {
+      ...tokenResult,
+      allowedSeconds: match.allowedSeconds,
+      status: match.status,
+    };
+  }
+
+  /**
+   * Transactional and conflict-safe finalizer for a PeerMatch.
+   * Records UsageLedger for both users exactly once.
+   */
+  static async finalizeMatchInternal(
+    matchId: string,
+    outcome: "COMPLETED" | "CANCELLED" | "EXPIRED" = "COMPLETED"
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const match = await tx.peerMatch.findUnique({
+        where: { id: matchId },
+      });
+
+      if (!match) return null;
+
+      if (["COMPLETED", "CANCELLED", "EXPIRED"].includes(match.status)) {
+        return match; // Idempotent
+      }
+
+      const now = new Date();
+      let actualSeconds = 0;
+
+      // Billing only occurs if match reached ACTIVE status (both connected)
+      if (match.status === "ACTIVE" && match.startedAt) {
+        const elapsed = Math.round((now.getTime() - match.startedAt.getTime()) / 1000);
+        actualSeconds = Math.max(0, Math.min(elapsed, match.allowedSeconds));
+      }
+
+      const updated = await tx.peerMatch.update({
+        where: { id: matchId },
+        data: {
+          status: match.status === "ACTIVE" ? outcome : "CANCELLED",
+          endedAt: now,
+          actualSeconds,
+        },
+      });
+
+      if (actualSeconds > 0) {
+        const [userA, userB] = await Promise.all([
+          tx.user.findUnique({ where: { id: match.userAId }, select: { plan: true, firebaseUid: true } }),
+          tx.user.findUnique({ where: { id: match.userBId }, select: { plan: true, firebaseUid: true } }),
+        ]);
+
+        const keyA = `peer:${match.id}:${match.userAId}`;
+        const keyB = `peer:${match.id}:${match.userBId}`;
+
+        // Upsert UsageLedger for User A
+        await tx.usageLedger.upsert({
+          where: { idempotencyKey: keyA },
+          update: {},
+          create: {
+            firebaseUid: userA?.firebaseUid || "unknown",
+            userId: match.userAId,
+            type: "PEER",
+            sessionId: match.id,
+            billableSeconds: actualSeconds,
+            planAtTime: userA?.plan || "FREE",
+            startedAt: match.startedAt || now,
+            endedAt: now,
+            idempotencyKey: keyA,
+          },
+        });
+
+        // Upsert UsageLedger for User B
+        await tx.usageLedger.upsert({
+          where: { idempotencyKey: keyB },
+          update: {},
+          create: {
+            firebaseUid: userB?.firebaseUid || "unknown",
+            userId: match.userBId,
+            type: "PEER",
+            sessionId: match.id,
+            billableSeconds: actualSeconds,
+            planAtTime: userB?.plan || "FREE",
+            startedAt: match.startedAt || now,
+            endedAt: now,
+            idempotencyKey: keyB,
+          },
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  /**
+   * Processes verified LiveKit webhook events.
+   */
+  static async handleLiveKitWebhook(rawBody: string, authHeader?: string) {
+    const apiKey = env.LIVEKIT_API_KEY;
+    const apiSecret = env.LIVEKIT_API_SECRET;
+
+    if (!apiKey || !apiSecret) {
+      console.error("[LiveKitWebhook] Missing LiveKit credentials.");
+      return { processed: false, error: "CREDENTIALS_MISSING" };
+    }
+
+    const receiver = new WebhookReceiver(apiKey, apiSecret);
+    let event;
+
+    try {
+      event = await receiver.receive(rawBody, authHeader);
+    } catch (err) {
+      console.error("[LiveKitWebhook] Signature verification failed:", err);
+      const error: AppError = new Error("Invalid LiveKit webhook signature.");
+      error.statusCode = 401;
+      error.code = "INVALID_WEBHOOK_SIGNATURE";
+      throw error;
+    }
+
+    const serverTimestamp = new Date().toISOString();
+    console.log(
+      `[LiveKitWebhook] event=${event.event} room=${event.room?.name || "none"} participant=${event.participant?.identity || "none"} server_timestamp=${serverTimestamp}`
+    );
+
+    const roomName = event.room?.name;
+
+    if (!roomName || !roomName.startsWith("peer_")) {
+      return { processed: false, reason: "IGNORED_NON_PEER_ROOM" };
+    }
+
+    const match = await prisma.peerMatch.findUnique({
+      where: { livekitRoom: roomName },
+    });
+
+    if (!match) {
+      return { processed: false, reason: "MATCH_NOT_FOUND" };
+    }
+
+    const now = new Date();
+
+    switch (event.event) {
+      case "participant_joined": {
+        const expectedA = `peer_${match.id}_a`;
+        const expectedB = `peer_${match.id}_b`;
+
+        let bothConnected = false;
+
+        if (env.LIVEKIT_URL && apiKey && apiSecret) {
+          try {
+            const host = env.LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://");
+            const roomService = new RoomServiceClient(host, apiKey, apiSecret);
+            const participants = await roomService.listParticipants(roomName);
+            if (participants && participants.length > 0) {
+              const identities = new Set(participants.map((p) => p.identity));
+              bothConnected = identities.has(expectedA) && identities.has(expectedB);
+            } else {
+              bothConnected = (event.room?.numParticipants || 0) >= 2;
+            }
+          } catch {
+            const numParticipants = event.room?.numParticipants || 0;
+            bothConnected = numParticipants >= 2;
+          }
+        } else {
+          const numParticipants = event.room?.numParticipants || 0;
+          bothConnected = numParticipants >= 2;
+        }
+
+        if (bothConnected) {
+          const updated = await prisma.peerMatch.updateMany({
+            where: { id: match.id, status: "MATCHED" },
+            data: {
+              status: "ACTIVE",
+              startedAt: now,
+              deadlineAt: new Date(now.getTime() + match.allowedSeconds * 1000),
+            },
+          });
+          if (updated.count > 0) {
+            console.log(
+              `[LiveKitWebhook] Both expected participants (${expectedA}, ${expectedB}) connected to ${roomName}. Transitioned to ACTIVE.`
+            );
+          }
+        }
+        break;
+      }
+
+
+
+
+      case "participant_left":
+      case "participant_connection_aborted":
+      case "room_finished": {
+        console.log(`[LiveKitWebhook] Event ${event.event} for room ${roomName}. Finalizing match.`);
+        await PeerService.finalizeMatchInternal(match.id, "COMPLETED");
+        break;
+      }
+
+      default:
+        break;
+    }
+
+    return { processed: true, event: event.event };
+  }
+
+  /**
+   * Mobile complete call (best-effort UX signal).
+   */
+  static async completeMatch(auth: AuthContext, matchId: string) {
+    const user = await prisma.user.findUnique({
+      where: { firebaseUid: auth.uid },
+    });
+
+    if (!user) {
+      const error: AppError = new Error("User record not found.");
+      error.statusCode = 404;
+      error.code = "USER_NOT_FOUND";
+      throw error;
+    }
+
+    const match = await prisma.peerMatch.findUnique({
+      where: { id: matchId },
+    });
+
+    if (!match || (match.userAId !== user.id && match.userBId !== user.id)) {
+      const error: AppError = new Error("Match not found or access denied.");
+      error.statusCode = 403;
+      error.code = "MATCH_ACCESS_DENIED";
+      throw error;
+    }
+
+    const updated = await PeerService.finalizeMatchInternal(matchId, "COMPLETED");
+    return { success: true, match: updated };
+  }
+
+  /**
+   * Records a moderation report against the practice partner.
+   */
+  static async reportPartner(
+    auth: AuthContext,
+    matchId: string,
+    reason: string,
+    details?: string
+  ) {
+    const user = await prisma.user.findUnique({
+      where: { firebaseUid: auth.uid },
+    });
+
+    if (!user) {
+      const error: AppError = new Error("User record not found.");
+      error.statusCode = 404;
+      error.code = "USER_NOT_FOUND";
+      throw error;
+    }
+
+    const match = await prisma.peerMatch.findUnique({
+      where: { id: matchId },
+    });
+
+    if (!match || (match.userAId !== user.id && match.userBId !== user.id)) {
+      const error: AppError = new Error("Match not found or access denied.");
+      error.statusCode = 403;
+      error.code = "MATCH_ACCESS_DENIED";
+      throw error;
+    }
+
+    const reportedUserId = user.id === match.userAId ? match.userBId : match.userAId;
+
+    const report = await prisma.report.create({
+      data: {
+        reporterId: user.id,
+        reportedUserId,
+        peerMatchId: match.id,
+        reason: reason.trim().slice(0, 100),
+        details: details ? details.trim().slice(0, 500) : null,
+      },
+    });
+
+    return { success: true, reportId: report.id };
+  }
+
+  /**
+   * Records a directional block against the partner and ends the current match.
+   */
+  static async blockPartner(auth: AuthContext, matchId: string) {
+    const user = await prisma.user.findUnique({
+      where: { firebaseUid: auth.uid },
+    });
+
+    if (!user) {
+      const error: AppError = new Error("User record not found.");
+      error.statusCode = 404;
+      error.code = "USER_NOT_FOUND";
+      throw error;
+    }
+
+    const match = await prisma.peerMatch.findUnique({
+      where: { id: matchId },
+    });
+
+    if (!match || (match.userAId !== user.id && match.userBId !== user.id)) {
+      const error: AppError = new Error("Match not found or access denied.");
+      error.statusCode = 403;
+      error.code = "MATCH_ACCESS_DENIED";
+      throw error;
+    }
+
+    const partnerId = user.id === match.userAId ? match.userBId : match.userAId;
+
+    // Upsert directional block
+    await prisma.block.upsert({
+      where: {
+        blockerId_blockedUserId: {
+          blockerId: user.id,
+          blockedUserId: partnerId,
+        },
+      },
+      create: {
+        blockerId: user.id,
+        blockedUserId: partnerId,
+      },
+      update: {},
+    });
+
+    // Finalize match immediately
+    await PeerService.finalizeMatchInternal(matchId, "COMPLETED");
+
+    return { success: true, blockedUserId: partnerId };
+  }
 }
+

@@ -52,11 +52,20 @@ enum PeerSlotStatus {
 }
 
 enum PeerMatchStatus {
-  SCHEDULED
+  MATCHED
   ACTIVE
   COMPLETED
-  MISSED
   CANCELLED
+  EXPIRED
+  SCHEDULED
+  MISSED
+}
+
+enum PeerQueueStatus {
+  WAITING
+  MATCHED
+  CANCELLED
+  EXPIRED
 }
 
 model User {
@@ -76,6 +85,7 @@ model User {
   voiceSessions      VoiceSession[]
   usageLedgers       UsageLedger[]
   peerAvailabilities PeerAvailability[]
+  peerQueueEntry     PeerQueueEntry?
 
   peerMatchesAsA     PeerMatch[] @relation("PeerMatchUserA")
   peerMatchesAsB     PeerMatch[] @relation("PeerMatchUserB")
@@ -210,6 +220,20 @@ model Utterance {
   @@map("utterances")
 }
 
+model PeerQueueEntry {
+  id        String          @id @default(cuid())
+  userId    String          @unique
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status    PeerQueueStatus @default(WAITING)
+  matchId   String?
+  expiresAt DateTime
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([status, expiresAt])
+  @@map("peer_queue_entries")
+}
+
 model PeerAvailability {
   id        String         @id @default(cuid())
   userId    String
@@ -225,19 +249,29 @@ model PeerAvailability {
 }
 
 model PeerMatch {
-  id          String          @id @default(cuid())
-  userAId     String
-  userBId     String
-  userA       User            @relation("PeerMatchUserA", fields: [userAId], references: [id], onDelete: Cascade)
-  userB       User            @relation("PeerMatchUserB", fields: [userBId], references: [id], onDelete: Cascade)
-  startsAt    DateTime
-  status      PeerMatchStatus @default(SCHEDULED)
-  livekitRoom String          @unique
-  createdAt   DateTime        @default(now())
-  completedAt DateTime?
+  id             String          @id @default(cuid())
+  userAId        String
+  userBId        String
+  userA          User            @relation("PeerMatchUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB          User            @relation("PeerMatchUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  status         PeerMatchStatus @default(MATCHED)
+  livekitRoom    String          @unique
+  allowedSeconds Int             @default(0)
+  actualSeconds  Int             @default(0)
+  matchedAt      DateTime        @default(now())
+  startedAt      DateTime?
+  endedAt        DateTime?
+  deadlineAt     DateTime?
+  startsAt       DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
 
   reports Report[]
 
+  @@index([userAId, status])
+  @@index([userBId, status])
+  @@index([status, deadlineAt])
   @@map("peer_matches")
 }
 
@@ -269,3 +303,4 @@ model Block {
   @@unique([blockerId, blockedUserId])
   @@map("blocks")
 }
+
