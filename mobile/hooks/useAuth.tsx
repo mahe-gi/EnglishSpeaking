@@ -1,4 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  ReactNode,
+} from "react";
 import {
   onAuthStateChanged,
   signInWithCredential,
@@ -17,7 +25,27 @@ export type AuthStatus =
   | "authenticated"
   | "error";
 
-export function useAuth() {
+export interface AuthContextType {
+  status: AuthStatus;
+  user: User | null;
+  firebaseUser: FirebaseUser | null;
+  onboardingCompleted: boolean;
+  setOnboardingCompleted: (val: boolean) => void;
+  assessmentCompleted: boolean;
+  setAssessmentCompleted: (val: boolean) => void;
+  baselineAssessmentId: string | null;
+  error: string | null;
+  signIn: () => Promise<void>;
+  signOut: () => Promise<void>;
+  retryBackendInit: () => Promise<void>;
+  refreshBootstrap: () => Promise<void>;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("idle");
   const [user, setUser] = useState<User | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -40,13 +68,22 @@ export function useAuth() {
         setStatus("initializingBackend");
         setError(null);
       }
+      console.log("[AuthTrace] 4. initBackend started. Fetching Firebase ID token...");
       const token = await fbUser.getIdToken();
+      console.log("[AuthTrace] 5. Firebase ID token obtained. Calling PUT /api/v1/me...");
       const {
         user: appUser,
         onboardingCompleted: isOnboardingDone,
         assessmentCompleted: isAssessmentDone,
         baselineAssessmentId: assessmentId,
       } = await bootstrapUser(token);
+
+      console.log("[AuthTrace] 6. PUT /api/v1/me SUCCESS:", JSON.stringify({
+        hasUser: !!appUser,
+        onboardingCompleted: isOnboardingDone,
+        assessmentCompleted: isAssessmentDone,
+        hasAssessmentId: !!assessmentId,
+      }));
 
       if (isMounted.current) {
         setUser(appUser);
@@ -56,27 +93,29 @@ export function useAuth() {
         setStatus("authenticated");
       }
     } catch (err: unknown) {
+      console.error("[AuthTrace] ❌ initBackend error:", err);
       if (isMounted.current) {
-        const message = err instanceof Error ? err.message : "Failed to initialize account with server.";
+        const message =
+          err instanceof Error ? err.message : "Failed to initialize account with server.";
         setError(message);
         setStatus("error");
       }
     }
   }, []);
 
-  // onAuthStateChanged is the single source of truth for session state and calling initBackend
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      if (!isMounted.current) return;
-
-      setFirebaseUser(fbUser);
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+      console.log("[AuthTrace] onAuthStateChanged fired. Has Firebase user:", !!fbUser);
       if (fbUser) {
-        await initBackend(fbUser);
+        setFirebaseUser(fbUser);
+        initBackend(fbUser);
       } else {
         setUser(null);
+        setFirebaseUser(null);
         setOnboardingCompleted(false);
         setAssessmentCompleted(false);
         setBaselineAssessmentId(null);
+        setError(null);
         setStatus("idle");
       }
     });
@@ -86,14 +125,16 @@ export function useAuth() {
 
   const signIn = useCallback(async () => {
     if (status === "authenticating" || status === "initializingBackend") {
-      return; // Prevent duplicate concurrent submissions
+      return;
     }
 
     try {
       setStatus("authenticating");
       setError(null);
+      console.log("[AuthTrace] 1. Triggering Google Native Sign-In...");
 
       const result = await signInWithGoogleNative();
+      console.log("[AuthTrace] 2. Google Native Sign-In completed. Cancelled:", !!result.cancelled, "Has idToken:", !!result.idToken);
 
       if (result.cancelled) {
         if (isMounted.current) {
@@ -106,10 +147,12 @@ export function useAuth() {
         throw new Error("No Google ID token was received from the sign-in provider.");
       }
 
+      console.log("[AuthTrace] 3. Exchanging Google credential with Firebase...");
       const credential = GoogleAuthProvider.credential(result.idToken);
-      // Signing in updates Firebase auth state; onAuthStateChanged will handle calling initBackend
-      await signInWithCredential(auth, credential);
+      const fbCred = await signInWithCredential(auth, credential);
+      console.log("[AuthTrace] 3b. Firebase signInWithCredential succeeded. Has user:", !!fbCred.user);
     } catch (err: unknown) {
+      console.error("[AuthTrace] ❌ signIn error:", err);
       if (isMounted.current) {
         const message = err instanceof Error ? err.message : "Google authentication failed.";
         setError(message);
@@ -117,6 +160,13 @@ export function useAuth() {
       }
     }
   }, [status]);
+
+  const refreshBootstrap = useCallback(async () => {
+    const currentFbUser = auth.currentUser;
+    if (currentFbUser) {
+      await initBackend(currentFbUser);
+    }
+  }, [initBackend]);
 
   const retryBackendInit = useCallback(async () => {
     if (firebaseUser) {
@@ -145,7 +195,7 @@ export function useAuth() {
     }
   }, []);
 
-  return {
+  const value: AuthContextType = {
     status,
     user,
     firebaseUser,
@@ -158,7 +208,18 @@ export function useAuth() {
     signIn,
     signOut: signOutUser,
     retryBackendInit,
+    refreshBootstrap,
     isLoading: status === "authenticating" || status === "initializingBackend",
     isAuthenticated: status === "authenticated" && user !== null,
   };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth(): AuthContextType {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
 }

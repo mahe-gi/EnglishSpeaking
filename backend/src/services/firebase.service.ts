@@ -13,19 +13,23 @@ export function getFirebaseAdminApp(): App {
     } else {
       const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = env;
 
-      if (!FIREBASE_PROJECT_ID || !FIREBASE_CLIENT_EMAIL || !FIREBASE_PRIVATE_KEY) {
+      if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
+        app = initializeApp({
+          credential: cert({
+            projectId: FIREBASE_PROJECT_ID,
+            clientEmail: FIREBASE_CLIENT_EMAIL,
+            privateKey: FIREBASE_PRIVATE_KEY,
+          }),
+        });
+      } else if (FIREBASE_PROJECT_ID) {
+        app = initializeApp({
+          projectId: FIREBASE_PROJECT_ID,
+        });
+      } else {
         throw new Error(
-          "Firebase Admin initialization failed: Missing required environment variables (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY)."
+          "Firebase Admin initialization failed: FIREBASE_PROJECT_ID is not configured."
         );
       }
-
-      app = initializeApp({
-        credential: cert({
-          projectId: FIREBASE_PROJECT_ID,
-          clientEmail: FIREBASE_CLIENT_EMAIL,
-          privateKey: FIREBASE_PRIVATE_KEY,
-        }),
-      });
     }
   }
   return app;

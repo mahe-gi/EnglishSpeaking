@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ntalo_postgres_local
+    environment:
+      POSTGRES_USER: ntalo
+      POSTGRES_PASSWORD: ntalo_local_password
+      POSTGRES_DB: ntalo_local
+    ports:
+      - "5432:5432"
+    volumes:
+      - ntalo_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  ntalo_postgres_data:

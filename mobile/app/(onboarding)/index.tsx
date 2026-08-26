@@ -11,6 +11,7 @@ import { AppText } from "../../components/AppText";
 import { Button } from "../../components/Button";
 import { auth } from "../../lib/firebase";
 import { submitOnboarding, OnboardingInput } from "../../lib/api";
+import { useAuth } from "../../hooks/useAuth";
 
 type CareerStatus = OnboardingInput["careerStatus"];
 type Goal = OnboardingInput["goal"];
@@ -48,6 +49,7 @@ const CONFIDENCE_LEVELS = [1, 2, 3, 4, 5];
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { setOnboardingCompleted, refreshBootstrap } = useAuth();
   const [step, setStep] = useState<number>(1);
   const [careerStatus, setCareerStatus] = useState<CareerStatus | null>(null);
   const [goal, setGoal] = useState<Goal | null>(null);
@@ -109,7 +111,12 @@ export default function OnboardingScreen() {
         confidence,
       });
 
-      router.replace("/");
+      // Synchronize global auth state so index screen and app state know onboarding is complete
+      setOnboardingCompleted(true);
+      await refreshBootstrap();
+
+      // Navigate directly to Baseline Speaking Assessment
+      router.replace("/(assessment)");
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to save profile. Please try again.";
