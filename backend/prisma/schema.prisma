@@ -7,6 +7,31 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum IdentityType {
+  ANONYMOUS
+  REGISTERED
+}
+
+enum Plan {
+  FREE
+  PREMIUM
+}
+
+enum VoiceSessionStatus {
+  CREATED
+  CONNECTING
+  ACTIVE
+  ENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum UsageType {
+  AI
+  PEER
+}
+
 enum SessionType {
   ASSESSMENT
   AI_PRACTICE
@@ -35,28 +60,98 @@ enum PeerMatchStatus {
 }
 
 model User {
-  id          String   @id @default(cuid())
-  firebaseUid String   @unique
-  email       String   @unique
-  name        String?
-  avatarUrl   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                 String       @id @default(cuid())
+  firebaseUid        String       @unique
+  email              String?      @unique
+  displayName        String?
+  avatarUrl          String?
+  identityType       IdentityType @default(ANONYMOUS)
+  plan               Plan         @default(FREE)
+  peerAgeConfirmedAt DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   profile            Profile?
   practiceSessions   PracticeSession[]
+  voiceSessions      VoiceSession[]
+  usageLedgers       UsageLedger[]
   peerAvailabilities PeerAvailability[]
 
-  peerMatchesAsA PeerMatch[] @relation("PeerMatchUserA")
-  peerMatchesAsB PeerMatch[] @relation("PeerMatchUserB")
+  peerMatchesAsA     PeerMatch[] @relation("PeerMatchUserA")
+  peerMatchesAsB     PeerMatch[] @relation("PeerMatchUserB")
 
-  reportsFiled    Report[] @relation("ReportedBy")
-  reportsReceived Report[] @relation("ReportedAgainst")
+  reportsFiled       Report[] @relation("ReportedBy")
+  reportsReceived    Report[] @relation("ReportedAgainst")
 
-  blocksInitiated Block[] @relation("BlockerUser")
-  blocksReceived  Block[] @relation("BlockedUser")
+  blocksInitiated    Block[] @relation("BlockerUser")
+  blocksReceived     Block[] @relation("BlockedUser")
+
+  sourceMergeIntents MergeIntent[] @relation("SourceUserIntents")
+  targetMergeIntents MergeIntent[] @relation("TargetUserIntents")
 
   @@map("users")
+}
+
+model UsageLedger {
+  id              String    @id @default(cuid())
+  firebaseUid     String
+  installationId  String?
+  userId          String?
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type            UsageType
+  sessionId       String
+  billableSeconds Int
+  planAtTime      Plan
+  startedAt       DateTime
+  endedAt         DateTime
+  idempotencyKey  String?   @unique
+  createdAt       DateTime  @default(now())
+
+  @@index([firebaseUid, type, createdAt])
+  @@index([installationId, type, createdAt])
+  @@index([userId, type, createdAt])
+  @@map("usage_ledgers")
+}
+
+model VoiceSession {
+  id                   String             @id @default(cuid())
+  roomName             String?            @unique
+  firebaseUid          String
+  installationId       String?
+  userId               String?
+  user                 User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  status               VoiceSessionStatus @default(CREATED)
+  allowedSeconds       Int
+  reservedSeconds      Int
+  actualSeconds        Int                @default(0)
+  startedAt            DateTime?
+  endedAt              DateTime?
+  reservationExpiresAt DateTime?
+  idempotencyKey       String?            @unique
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([firebaseUid, status])
+  @@index([installationId, status])
+  @@index([userId, status])
+  @@index([status, reservationExpiresAt])
+  @@map("voice_sessions")
+}
+
+model MergeIntent {
+  id                String    @id @default(cuid())
+  sourceFirebaseUid String
+  sourceUserId      String?
+  sourceUser        User?     @relation("SourceUserIntents", fields: [sourceUserId], references: [id], onDelete: SetNull)
+  targetUserId      String?
+  targetUser        User?     @relation("TargetUserIntents", fields: [targetUserId], references: [id], onDelete: SetNull)
+  installationId    String
+  expiresAt         DateTime
+  usedAt            DateTime?
+  createdAt         DateTime  @default(now())
+
+  @@index([sourceFirebaseUid, expiresAt])
+  @@map("merge_intents")
 }
 
 model Profile {

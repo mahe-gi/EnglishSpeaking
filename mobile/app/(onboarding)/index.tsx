@@ -49,7 +49,7 @@ const CONFIDENCE_LEVELS = [1, 2, 3, 4, 5];
 
 export default function OnboardingScreen() {
   const router = useRouter();
-  const { setOnboardingCompleted, refreshBootstrap } = useAuth();
+  const { refreshBootstrap } = useAuth();
   const [step, setStep] = useState<number>(1);
   const [careerStatus, setCareerStatus] = useState<CareerStatus | null>(null);
   const [goal, setGoal] = useState<Goal | null>(null);
@@ -111,12 +111,10 @@ export default function OnboardingScreen() {
         confidence,
       });
 
-      // Synchronize global auth state so index screen and app state know onboarding is complete
-      setOnboardingCompleted(true);
       await refreshBootstrap();
 
-      // Navigate directly to Baseline Speaking Assessment
-      router.replace("/(assessment)");
+      // Return to main tabs
+      router.replace("/(tabs)" as any);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to save profile. Please try again.";

@@ -49,4 +49,54 @@ export function createAuthMiddleware(verifier: TokenVerifier = verifyFirebaseTok
   };
 }
 
+import crypto from "crypto";
+import { env } from "../config/env.js";
+
 export const authMiddleware = createAuthMiddleware();
+
+export function requireInternalAuth(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    res.status(401).json({
+      success: false,
+      error: {
+        code: "UNAUTHORIZED_INTERNAL_CALL",
+        message: "Internal authentication required.",
+      },
+    });
+    return;
+  }
+
+  const parts = authHeader.split(" ");
+  if (parts.length !== 2 || parts[0] !== "Bearer" || !parts[1]) {
+    res.status(401).json({
+      success: false,
+      error: {
+        code: "UNAUTHORIZED_INTERNAL_CALL",
+        message: "Invalid authorization header format. Expected 'Bearer <secret>'.",
+      },
+    });
+    return;
+  }
+
+  const providedSecret = parts[1];
+  const expectedSecret = env.AGENT_INTERNAL_SECRET;
+
+  if (
+    !providedSecret ||
+    !expectedSecret ||
+    providedSecret.length !== expectedSecret.length ||
+    !crypto.timingSafeEqual(Buffer.from(providedSecret), Buffer.from(expectedSecret))
+  ) {
+    res.status(401).json({
+      success: false,
+      error: {
+        code: "UNAUTHORIZED_INTERNAL_CALL",
+        message: "Invalid internal agent secret.",
+      },
+    });
+    return;
+  }
+
+  next();
+}

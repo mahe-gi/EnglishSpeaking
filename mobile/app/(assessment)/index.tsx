@@ -144,6 +144,7 @@ export default function AssessmentScreen() {
                 startData.assessment.id
               );
               setReport(completedReport);
+              setRecordingState("ready");
             } catch (evalErr: unknown) {
               const msg =
                 evalErr instanceof Error
@@ -155,11 +156,21 @@ export default function AssessmentScreen() {
           } else if (firstUnansweredIndex >= ASSESSMENT_PROMPTS.length) {
             // All 3 answered -> complete assessment and load report
             setRecordingState("completing");
-            const completedReport = await completeAssessment(
-              idToken,
-              startData.assessment.id
-            );
-            setReport(completedReport);
+            try {
+              const completedReport = await completeAssessment(
+                idToken,
+                startData.assessment.id
+              );
+              setReport(completedReport);
+            } catch (evalErr: unknown) {
+              const msg =
+                evalErr instanceof Error
+                  ? evalErr.message
+                  : "Failed to load baseline report.";
+              setErrorMessage(msg);
+            } finally {
+              setRecordingState("ready");
+            }
           } else {
             setCurrentPromptIndex(firstUnansweredIndex);
             setRecordingState(
@@ -272,8 +283,10 @@ export default function AssessmentScreen() {
       } else {
         setRecordingState("permissionRequired");
       }
+      return result.granted;
     } catch {
       setErrorMessage("Failed to request microphone permission.");
+      return false;
     }
   };
 
@@ -306,10 +319,16 @@ export default function AssessmentScreen() {
       await Speech.stop();
       setIsSpeakingTTS(false);
 
-      if (!permissionGranted) {
-        await requestPermission();
-        return;
+      let isGranted = permissionGranted;
+      if (!isGranted) {
+        isGranted = await requestPermission();
+        if (!isGranted) return;
       }
+
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
 
       await recorder.prepareToRecordAsync();
       recorder.record({ forDuration: 30 });
@@ -395,6 +414,7 @@ export default function AssessmentScreen() {
         try {
           const completedReport = await completeAssessment(idToken, assessmentId);
           setReport(completedReport);
+          setRecordingState("ready");
         } catch (completeErr: unknown) {
           const msg =
             completeErr instanceof Error
@@ -445,27 +465,7 @@ export default function AssessmentScreen() {
     Math.round((recorderState.durationMillis || 0) / 1000)
   );
 
-  if (isInitializing || recordingState === "completing") {
-    return (
-      <Screen>
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#111827" />
-          <AppText variant="title" weight="semibold" style={styles.loadingHeading}>
-            {recordingState === "completing"
-              ? "Generating Baseline Report..."
-              : "Preparing speaking assessment..."}
-          </AppText>
-          <AppText variant="caption" color="#4B5563" style={styles.loadingText}>
-            {recordingState === "completing"
-              ? "Calculating fluency metrics and evaluating communication rubric with Sarvam 105B."
-              : "Connecting to server and checking permissions."}
-          </AppText>
-        </View>
-      </Screen>
-    );
-  }
-
-  // Phase 2C Baseline Assessment Report View
+  // Phase 2C Baseline Assessment Report View (Render report as soon as available)
   if (report) {
     return (
       <Screen>
@@ -474,21 +474,21 @@ export default function AssessmentScreen() {
           <View style={styles.reportHeader}>
             <View style={styles.badge}>
               <AppText variant="caption" weight="medium" color="#047857">
-                ✓ Baseline Assessment Complete
+                ✓ Speaking Check Complete
               </AppText>
             </View>
             <AppText variant="title" weight="semibold" style={styles.reportTitle}>
-              Communication Baseline Report
+              Your Speaking Snapshot
             </AppText>
             <AppText variant="body" color="#6B7280">
-              Evaluated across 3 speaking prompts with Indian English metrics and Sarvam 105B.
+              Evaluated across 3 speaking prompts for clarity, pacing, and structure.
             </AppText>
           </View>
 
           {/* Overall Score Card */}
           <View style={styles.overallScoreCard}>
             <AppText variant="caption" weight="semibold" color="#4B5563">
-              OVERALL BASELINE SCORE
+              OVERALL SPEAKING SCORE
             </AppText>
             <View style={styles.scoreRow}>
               <AppText variant="title" weight="semibold" color="#111827" style={styles.largeScore}>
@@ -595,7 +595,7 @@ export default function AssessmentScreen() {
             <AppText variant="body" weight="semibold" color="#047857" style={styles.insightTitle}>
               Key Strengths
             </AppText>
-            {report.strengths.map((str, idx) => (
+            {report.strengths.map((str: string, idx: number) => (
               <View key={idx} style={styles.bulletRow}>
                 <AppText variant="body" color="#047857">
                   •
@@ -612,7 +612,7 @@ export default function AssessmentScreen() {
             <AppText variant="body" weight="semibold" color="#B45309" style={styles.insightTitle}>
               Priority Improvement Areas
             </AppText>
-            {report.weaknesses.map((weakness, idx) => (
+            {report.weaknesses.map((weakness: string, idx: number) => (
               <View key={idx} style={styles.bulletRow}>
                 <AppText variant="body" color="#B45309">
                   {idx + 1}.
@@ -628,10 +628,30 @@ export default function AssessmentScreen() {
           <View style={styles.reportFooter}>
             <Button
               title="Continue to Home"
-              onPress={() => router.replace("/")}
+              onPress={() => router.replace("/(tabs)" as any)}
             />
           </View>
         </ScrollView>
+      </Screen>
+    );
+  }
+
+  if (isInitializing || recordingState === "completing") {
+    return (
+      <Screen>
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#111827" />
+          <AppText variant="title" weight="semibold" style={styles.loadingHeading}>
+            {recordingState === "completing"
+              ? "Generating Speaking Snapshot..."
+              : "Preparing speaking check..."}
+          </AppText>
+          <AppText variant="caption" color="#4B5563" style={styles.loadingText}>
+            {recordingState === "completing"
+              ? "Analyzing your clarity, pacing, and speaking structure..."
+              : "Connecting and preparing audio session."}
+          </AppText>
+        </View>
       </Screen>
     );
   }
@@ -799,10 +819,9 @@ export default function AssessmentScreen() {
             </View>
           )}
 
-          {!isCurrentPromptAnswered && recordingState === "ready" && (
+          {!isCurrentPromptAnswered && (recordingState === "ready" || recordingState === "permissionRequired") && (
             <Button
               title="Start Recording"
-              disabled={!permissionGranted}
               onPress={handleStartRecording}
             />
           )}

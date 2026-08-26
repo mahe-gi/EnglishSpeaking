@@ -17,6 +17,7 @@ const envSchema = z.object({
   LIVEKIT_URL: z.string().optional(),
   LIVEKIT_API_KEY: z.string().optional(),
   LIVEKIT_API_SECRET: z.string().optional(),
+  AGENT_INTERNAL_SECRET: z.string().min(16),
 });
 
 const parsed = envSchema.safeParse(process.env);

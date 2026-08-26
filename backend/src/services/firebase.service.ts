@@ -39,11 +39,15 @@ export async function verifyFirebaseToken(idToken: string): Promise<AuthContext>
   const adminApp = getFirebaseAdminApp();
   const auth = getAuth(adminApp);
   const decoded = await auth.verifyIdToken(idToken);
+  const signInProvider = decoded.firebase?.sign_in_provider;
+  const isAnonymous = signInProvider === "anonymous" || !decoded.email;
 
   return {
     uid: decoded.uid,
     email: decoded.email,
     name: decoded.name,
     picture: decoded.picture,
+    isAnonymous,
+    signInProvider,
   };
 }

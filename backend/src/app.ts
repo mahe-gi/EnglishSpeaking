@@ -8,6 +8,7 @@ import { createAssessmentsRouter } from "./modules/assessments/assessments.route
 import { createPracticeRouter } from "./modules/practice/practice.route.js";
 import { createProgressRouter } from "./modules/progress/progress.route.js";
 import { createPeerRouter } from "./modules/peer/peer.route.js";
+import { createVoiceRouter, createInternalRouter } from "./modules/voice/voice.route.js";
 import { errorMiddleware } from "./middleware/error.middleware.js";
 import { TokenVerifier } from "./middleware/auth.middleware.js";
 import { TranscribeFunction } from "./services/sarvam.service.js";
@@ -68,6 +69,8 @@ export function createApp(options: AppOptions = {}): Express {
       tokenGenerator: options.peerTokenGenerator,
     })
   );
+  app.use("/api/v1", createVoiceRouter(options.tokenVerifier));
+  app.use("/api/v1", createInternalRouter());
 
   // Global error handler (must be last)
   app.use(errorMiddleware);

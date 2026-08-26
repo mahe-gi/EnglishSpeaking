@@ -3,6 +3,8 @@ export interface AuthContext {
   email?: string;
   name?: string;
   picture?: string;
+  isAnonymous: boolean;
+  signInProvider?: string;
 }
 
 declare global {

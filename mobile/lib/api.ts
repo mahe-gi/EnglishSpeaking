@@ -1,23 +1,40 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { requireEnv } from "./env";
 
+export type IdentityType = "ANONYMOUS" | "REGISTERED";
+export type Plan = "FREE" | "PREMIUM";
+export type ProductState = "GUEST" | "FREE" | "PREMIUM";
+
 export interface User {
   id: string;
   firebaseUid: string;
-  email: string;
-  name: string | null;
+  email: string | null;
+  displayName: string | null;
   avatarUrl: string | null;
+  identityType: IdentityType;
+  plan: Plan;
+  peerAgeConfirmedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface UserEntitlements {
+  productState: ProductState;
+  remainingAiSeconds: number;
+  remainingPeerSeconds: number;
+  dailyAiSecondsLimit: number;
+  monthlyAiSecondsLimit: number;
+  peerAllowed: boolean;
+  isAgeConfirmed: boolean;
 }
 
 export interface Profile {
   id: string;
   userId: string;
-  careerStatus: string;
-  goal: string;
-  nativeLanguage: string;
-  confidence: number;
+  careerStatus: string | null;
+  goal: string | null;
+  nativeLanguage: string | null;
+  confidence: number | null;
   baselineScore: number | null;
   currentScore: number | null;
   totalSpeakingSeconds: number;
@@ -25,9 +42,22 @@ export interface Profile {
 
 export interface BootstrapData {
   user: User;
+  entitlements: UserEntitlements;
+  profile: Profile | null;
+  speakingCheckCompleted: boolean;
+  baselineAssessmentId: string | null;
+  // Deprecated backward-compatibility
   onboardingCompleted: boolean;
   assessmentCompleted: boolean;
-  baselineAssessmentId: string | null;
+}
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+  };
 }
 
 export interface OnboardingInput {
@@ -94,27 +124,32 @@ export interface AssessmentReport {
   completedAt: string;
 }
 
-export interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: {
-    code: string;
-    message: string;
-  };
+export interface MergeIntentResponse {
+  mergeIntentId: string;
+  expiresAt: string;
 }
 
-export async function bootstrapUser(idToken: string): Promise<BootstrapData> {
+export async function bootstrapUser(
+  idToken: string,
+  installationId?: string | null
+): Promise<BootstrapData> {
   const apiBaseUrl = requireEnv(
     process.env.EXPO_PUBLIC_API_URL,
     "EXPO_PUBLIC_API_URL"
   );
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${idToken}`,
+  };
+
+  if (installationId) {
+    headers["x-installation-id"] = installationId;
+  }
+
   const response = await fetch(`${apiBaseUrl}/me`, {
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-    },
+    headers,
   });
 
   const json: ApiResponse<BootstrapData> = await response.json();
@@ -122,6 +157,92 @@ export async function bootstrapUser(idToken: string): Promise<BootstrapData> {
   if (!response.ok || !json.success || !json.data) {
     const errorMsg = json.error?.message || `Bootstrap failed with status ${response.status}`;
     throw new Error(errorMsg);
+  }
+
+  return json.data;
+}
+
+export async function confirmPeerAge(idToken: string): Promise<{ success: boolean; peerAgeConfirmedAt: string }> {
+  const apiBaseUrl = requireEnv(
+    process.env.EXPO_PUBLIC_API_URL,
+    "EXPO_PUBLIC_API_URL"
+  );
+
+  const response = await fetch(`${apiBaseUrl}/users/confirm-age`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+
+  const json: ApiResponse<{ success: boolean; peerAgeConfirmedAt: string }> = await response.json();
+
+  if (!response.ok || !json.success || !json.data) {
+    throw new Error(json.error?.message || "Failed to confirm age for peer practice.");
+  }
+
+  return json.data;
+}
+
+export async function createMergeIntent(
+  idToken: string,
+  installationId: string
+): Promise<MergeIntentResponse> {
+  const apiBaseUrl = requireEnv(
+    process.env.EXPO_PUBLIC_API_URL,
+    "EXPO_PUBLIC_API_URL"
+  );
+
+  const response = await fetch(`${apiBaseUrl}/account/merge-intents`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+      "x-installation-id": installationId,
+    },
+    body: JSON.stringify({ installationId }),
+  });
+
+  const json: ApiResponse<MergeIntentResponse> = await response.json();
+
+  if (!response.ok || !json.success || !json.data) {
+    throw new Error(json.error?.message || "Failed to initiate account merge.");
+  }
+
+  return json.data;
+}
+
+export async function completeMerge(
+  idToken: string,
+  mergeIntentId: string,
+  installationId?: string | null
+): Promise<{ success: boolean; user: User; entitlements: UserEntitlements }> {
+  const apiBaseUrl = requireEnv(
+    process.env.EXPO_PUBLIC_API_URL,
+    "EXPO_PUBLIC_API_URL"
+  );
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${idToken}`,
+  };
+
+  if (installationId) {
+    headers["x-installation-id"] = installationId;
+  }
+
+  const response = await fetch(`${apiBaseUrl}/account/complete-merge`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ mergeIntentId }),
+  });
+
+  const json: ApiResponse<{ success: boolean; user: User; entitlements: UserEntitlements }> =
+    await response.json();
+
+  if (!response.ok || !json.success || !json.data) {
+    throw new Error(json.error?.message || "Failed to complete account merge.");
   }
 
   return json.data;
@@ -681,3 +802,43 @@ export async function blockPeerPartner(idToken: string, matchId: string): Promis
     throw new Error(json.error?.message || "Failed to block partner.");
   }
 }
+
+export interface VoiceSessionData {
+  sessionId: string;
+  roomName: string;
+  livekitUrl: string;
+  participantToken: string;
+  allowedSeconds: number;
+  remainingAiSecondsAfterReservation: number;
+}
+
+export async function createVoiceSession(
+  idToken: string,
+  installationId?: string | null,
+  idempotencyKey?: string | null
+): Promise<VoiceSessionData> {
+  const apiBaseUrl = requireEnv(process.env.EXPO_PUBLIC_API_URL, "EXPO_PUBLIC_API_URL");
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${idToken}`,
+  };
+
+  if (installationId) {
+    headers["x-installation-id"] = installationId;
+  }
+  if (idempotencyKey) {
+    headers["idempotency-key"] = idempotencyKey;
+  }
+
+  const response = await fetch(`${apiBaseUrl}/voice/sessions`, {
+    method: "POST",
+    headers,
+  });
+
+  const json: ApiResponse<VoiceSessionData> = await response.json();
+  if (!response.ok || !json.success || !json.data) {
+    throw new Error(json.error?.message || "Failed to create voice session.");
+  }
+
+  return json.data;
+}
+

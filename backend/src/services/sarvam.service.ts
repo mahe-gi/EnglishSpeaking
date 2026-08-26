@@ -21,8 +21,11 @@ export async function transcribeWithSarvam(
     throw error;
   }
 
+  // Normalize MIME types for Sarvam API compatibility (Sarvam expects audio/x-m4a or audio/mp4 instead of audio/m4a)
+  const normalizedMimeType = mimeType === "audio/m4a" ? "audio/x-m4a" : mimeType;
+
   const formData = new FormData();
-  const blob = new Blob([audioBuffer], { type: mimeType });
+  const blob = new Blob([audioBuffer], { type: normalizedMimeType });
   formData.append("file", blob, filename);
   formData.append("model", "saaras:v4");
   formData.append("mode", "verbatim");
