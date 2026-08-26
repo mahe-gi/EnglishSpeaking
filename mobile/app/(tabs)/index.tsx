@@ -7,10 +7,13 @@ import {
   ScrollView,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "../../components/Screen";
 import { AppText } from "../../components/AppText";
 import { Button } from "../../components/Button";
+import { StatusBadge } from "../../components/StatusBadge";
 import { useAuth } from "../../hooks/useAuth";
+import { colors, radius, spacing, shadows } from "../../theme";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -65,110 +68,111 @@ export default function HomeScreen() {
     await signInWithGoogle();
   };
 
+  const getProductBadgeVariant = () => {
+    if (productState === "PREMIUM") return "accent";
+    if (productState === "FREE") return "success";
+    return "neutral";
+  };
+
+  const getProductBadgeLabel = () => {
+    if (productState === "PREMIUM") return "PREMIUM";
+    if (productState === "FREE") return "FREE ACCOUNT";
+    return "GUEST PREVIEW";
+  };
+
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        {/* Header */}
+        {/* Top Header */}
         <View style={styles.header}>
           <View style={styles.badgeRow}>
-            <View style={styles.stateBadge}>
-              <AppText variant="caption" weight="medium" color="#4B5563">
-                {productState === "GUEST"
-                  ? "Guest Mode"
-                  : productState === "PREMIUM"
-                  ? "⭐ Premium"
-                  : "✓ Free Account"}
-              </AppText>
-            </View>
+            <StatusBadge
+              label={getProductBadgeLabel()}
+              variant={getProductBadgeVariant()}
+            />
           </View>
-          <AppText variant="title" weight="semibold" style={styles.title}>
+          <AppText variant="display" color={colors.textPrimary}>
             Ntalo
           </AppText>
-          <AppText variant="subtitle" color="#6B7280" style={styles.tagline}>
-            Speak more. Think less.
+          <AppText variant="subtitle" color={colors.textSecondary} style={styles.tagline}>
+            Practice speaking English in real conversations.
           </AppText>
         </View>
 
-        {/* Section Heading */}
-        <AppText variant="body" weight="semibold" color="#374151" style={styles.sectionTitle}>
-          What do you want to practice?
-        </AppText>
+        {/* Action Cards */}
+        <View style={styles.actionsContainer}>
+          {/* Primary Action: Talk with AI */}
+          <TouchableOpacity
+            style={[styles.actionCard, styles.aiCard]}
+            activeOpacity={0.8}
+            onPress={handleTalkWithAi}
+            accessibilityRole="button"
+            accessibilityLabel="Talk with AI"
+          >
+            <View style={styles.cardHeader}>
+              <View style={styles.iconCircle}>
+                <Ionicons name="sparkles" size={22} color={colors.textInverse} />
+              </View>
+              <View style={styles.cardTextContent}>
+                <AppText variant="title" color={colors.textPrimary}>
+                  Talk with AI
+                </AppText>
+                <AppText variant="body" color={colors.textSecondary} style={styles.cardSubtitle}>
+                  {productState === "GUEST"
+                    ? `${Math.round((entitlements?.remainingAiSeconds || 0) / 60)} min free preview remaining`
+                    : "Practice with an AI speaking partner"}
+                </AppText>
+              </View>
+              <Ionicons name="arrow-forward" size={20} color={colors.textTertiary} />
+            </View>
+          </TouchableOpacity>
 
-        {/* Primary Action: Talk with AI */}
-        <TouchableOpacity
-          style={[styles.actionCard, styles.aiCard]}
-          activeOpacity={0.85}
-          onPress={handleTalkWithAi}
-        >
-          <View style={styles.cardHeader}>
-            <View style={styles.iconCircle}>
-              <AppText variant="title" color="#FFFFFF">
-                ◉
-              </AppText>
+          {/* Secondary Action: Talk with a Person */}
+          <TouchableOpacity
+            style={[styles.actionCard, styles.peerCard]}
+            activeOpacity={0.8}
+            onPress={handleTalkWithPerson}
+            accessibilityRole="button"
+            accessibilityLabel="Talk with a Person"
+          >
+            <View style={styles.cardHeader}>
+              <View style={[styles.iconCircle, styles.peerIconCircle]}>
+                <Ionicons name="people" size={22} color={colors.textInverse} />
+              </View>
+              <View style={styles.cardTextContent}>
+                <AppText variant="title" color={colors.textPrimary}>
+                  Talk with a Person
+                </AppText>
+                <AppText variant="body" color={colors.textSecondary} style={styles.cardSubtitle}>
+                  Instant 1-on-1 practice with another learner
+                </AppText>
+              </View>
+              <Ionicons name="arrow-forward" size={20} color={colors.textTertiary} />
             </View>
-            <View style={styles.cardTextContent}>
-              <AppText variant="title" weight="semibold" color="#111827">
-                Talk with AI
-              </AppText>
-              <AppText variant="body" color="#4B5563" style={styles.cardSubtitle}>
-                {productState === "GUEST"
-                  ? `${Math.round((entitlements?.remainingAiSeconds || 0) / 60)} min free preview remaining`
-                  : "Practice a real conversation"}
-              </AppText>
-            </View>
-            <AppText variant="title" color="#9CA3AF" style={styles.cardArrow}>
-              →
-            </AppText>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
 
-        {/* Secondary Action: Talk with a Person */}
-        <TouchableOpacity
-          style={[styles.actionCard, styles.peerCard]}
-          activeOpacity={0.85}
-          onPress={handleTalkWithPerson}
-        >
-          <View style={styles.cardHeader}>
-            <View style={[styles.iconCircle, styles.peerIconCircle]}>
-              <AppText variant="title" color="#FFFFFF">
-                🎙
-              </AppText>
-            </View>
-            <View style={styles.cardTextContent}>
-              <AppText variant="title" weight="semibold" color="#111827">
-                Talk with a Person
-              </AppText>
-              <AppText variant="body" color="#4B5563" style={styles.cardSubtitle}>
-                Practice with another learner
-              </AppText>
-            </View>
-            <AppText variant="title" color="#9CA3AF" style={styles.cardArrow}>
-              →
-            </AppText>
-          </View>
-        </TouchableOpacity>
-
-        {/* Weekly Summary */}
+        {/* Practice Overview */}
         <View style={styles.summaryCard}>
-          <AppText variant="caption" weight="semibold" color="#6B7280" style={styles.summaryHeader}>
-            THIS WEEK
+          <AppText variant="micro" color={colors.textSecondary} style={styles.summaryHeader}>
+            PRACTICE SUMMARY
           </AppText>
           <View style={styles.summaryRow}>
             <View style={styles.summaryItem}>
-              <AppText variant="title" weight="semibold" color="#111827">
+              <AppText variant="title" color={colors.textPrimary}>
                 {Math.round((user ? 0 : 0) / 60)} min
               </AppText>
-              <AppText variant="caption" color="#6B7280">
-                speaking
+              <AppText variant="caption" color={colors.textSecondary}>
+                Total Speaking
               </AppText>
             </View>
             <View style={styles.summaryDivider} />
             <View style={styles.summaryItem}>
-              <AppText variant="title" weight="semibold" color="#111827">
+              <AppText variant="title" color={colors.textPrimary}>
                 0
               </AppText>
-              <AppText variant="caption" color="#6B7280">
-                sessions
+              <AppText variant="caption" color={colors.textSecondary}>
+                Sessions
               </AppText>
             </View>
           </View>
@@ -179,16 +183,14 @@ export default function HomeScreen() {
       <Modal visible={showGoogleModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <View style={styles.modalBadge}>
-              <AppText variant="caption" weight="medium" color="#1D4ED8">
-                👥 Peer Safety
-              </AppText>
+            <View style={styles.modalIconContainer}>
+              <Ionicons name="shield-checkmark" size={32} color={colors.accent} />
             </View>
-            <AppText variant="title" weight="semibold" style={styles.modalTitle}>
-              Practice with real people
+            <AppText variant="title" align="center" color={colors.textPrimary}>
+              Verified Peer Practice
             </AppText>
-            <AppText variant="body" color="#4B5563" style={styles.modalBody}>
-              Sign in so we can keep peer conversations safe, respectful, and verified.
+            <AppText variant="body" align="center" color={colors.textSecondary} style={styles.modalBody}>
+              Sign in with Google to keep peer conversations respectful, authentic, and verified.
             </AppText>
 
             <Button
@@ -200,7 +202,7 @@ export default function HomeScreen() {
 
             <Button
               title="Not now"
-              variant="outline"
+              variant="ghost"
               onPress={() => setShowGoogleModal(false)}
               style={styles.modalCancelButton}
             />
@@ -212,16 +214,14 @@ export default function HomeScreen() {
       <Modal visible={showAgeModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <View style={styles.modalBadge}>
-              <AppText variant="caption" weight="medium" color="#047857">
-                ✓ Eligibility
-              </AppText>
+            <View style={[styles.modalIconContainer, { backgroundColor: colors.successSubtle }]}>
+              <Ionicons name="checkmark-circle" size={32} color={colors.success} />
             </View>
-            <AppText variant="title" weight="semibold" style={styles.modalTitle}>
+            <AppText variant="title" align="center" color={colors.textPrimary}>
               Age Confirmation
             </AppText>
-            <AppText variant="body" color="#4B5563" style={styles.modalBody}>
-              Peer practice is currently available to people 18 and older.
+            <AppText variant="body" align="center" color={colors.textSecondary} style={styles.modalBody}>
+              Peer practice is currently available for adults 18 and older.
             </AppText>
 
             <Button
@@ -233,7 +233,7 @@ export default function HomeScreen() {
 
             <Button
               title="Cancel"
-              variant="outline"
+              variant="ghost"
               onPress={() => setShowAgeModal(false)}
               style={styles.modalCancelButton}
             />
@@ -246,92 +246,70 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   scrollContainer: {
-    paddingVertical: 24,
-    gap: 16,
+    paddingVertical: spacing.xl,
+    gap: spacing.lg,
   },
   header: {
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
   },
   badgeRow: {
-    flexDirection: "row",
-    marginBottom: 8,
-  },
-  stateBadge: {
-    backgroundColor: "#F3F4F6",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  title: {
-    fontSize: 28,
+    marginBottom: spacing.sm,
   },
   tagline: {
-    marginTop: 4,
-    fontSize: 16,
+    marginTop: spacing.xxs,
   },
-  sectionTitle: {
-    marginTop: 8,
-    marginBottom: 4,
-    fontSize: 15,
+  actionsContainer: {
+    gap: spacing.md,
   },
   actionCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E5E7EB",
-    borderWidth: 1.5,
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    ...shadows.subtle,
   },
   aiCard: {
-    backgroundColor: "#F9FAFB",
-    borderColor: "#111827",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
   },
   peerCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E5E7EB",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
   },
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
+    gap: spacing.md,
   },
   iconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#111827",
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    backgroundColor: colors.brand,
     justifyContent: "center",
     alignItems: "center",
   },
   peerIconCircle: {
-    backgroundColor: "#2563EB",
+    backgroundColor: colors.accent,
   },
   cardTextContent: {
     flex: 1,
   },
   cardSubtitle: {
     marginTop: 2,
-    fontSize: 14,
-  },
-  cardArrow: {
-    fontSize: 20,
   },
   summaryCard: {
-    backgroundColor: "#F9FAFB",
-    borderColor: "#E5E7EB",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 12,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    marginTop: spacing.xs,
   },
   summaryHeader: {
-    letterSpacing: 0.8,
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   summaryRow: {
     flexDirection: "row",
@@ -344,37 +322,36 @@ const styles = StyleSheet.create({
   summaryDivider: {
     width: 1,
     height: 32,
-    backgroundColor: "#E5E7EB",
+    backgroundColor: colors.border,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   modalCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
     width: "100%",
     maxWidth: 360,
     alignItems: "center",
-    gap: 12,
+    gap: spacing.md,
+    ...shadows.medium,
   },
-  modalBadge: {
-    backgroundColor: "#EFF6FF",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  modalTitle: {
-    textAlign: "center",
+  modalIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.full,
+    backgroundColor: colors.accentSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
   },
   modalBody: {
-    textAlign: "center",
-    lineHeight: 20,
-    marginBottom: 8,
+    marginBottom: spacing.xs,
   },
   modalButton: {
     width: "100%",
@@ -383,3 +360,4 @@ const styles = StyleSheet.create({
     width: "100%",
   },
 });
+

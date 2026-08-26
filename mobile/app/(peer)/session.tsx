@@ -1,22 +1,22 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   SafeAreaView,
   Alert,
   Modal,
   TextInput,
-  ActivityIndicator,
   Platform,
   StatusBar,
 } from "react-native";
-
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { AudioSession } from "@livekit/react-native";
 import { Room, RoomEvent } from "livekit-client";
 import { auth } from "../../lib/firebase";
+import { AppText } from "../../components/AppText";
+import { Button } from "../../components/Button";
 import {
   getPeerMatchToken,
   completePeerMatch,
@@ -24,6 +24,7 @@ import {
   blockPeerPartner,
   PeerTokenData,
 } from "../../lib/api";
+import { colors, radius, spacing, shadows } from "../../theme";
 
 type PeerConnectionState =
   | "initializing"
@@ -131,16 +132,15 @@ export default function PeerSessionScreen() {
           setConnectionState("ended");
         });
 
-        room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
           if (!isMounted) return;
-          console.log(`[PeerSession] 🎧 Subscribed to remote track kind=${track.kind} from ${participant.identity}`);
+          console.log(`[PeerSession] Subscribed to remote track kind=${track.kind} from ${participant.identity}`);
         });
-
 
         // 4. Connect to LiveKit
         await room.connect(tokenResult.serverUrl, tokenResult.participantToken);
 
-        // 5. Enable microphone only
+        // 5. Enable microphone
         await room.localParticipant.setMicrophoneEnabled(true);
       } catch (err: unknown) {
         if (!isMounted) return;
@@ -206,7 +206,6 @@ export default function PeerSessionScreen() {
     }
     await AudioSession.stopAudioSession();
 
-    // Call completeMatch (best-effort UX signal)
     if (matchId) {
       try {
         const currentUser = auth.currentUser;
@@ -287,15 +286,33 @@ export default function PeerSessionScreen() {
 
   const maxAllowedSecs = tokenData?.allowedSeconds || 900;
 
+  const renderStatus = () => {
+    switch (connectionState) {
+      case "connected":
+        return "Live Call";
+      case "waitingForPartner":
+        return "Waiting for partner...";
+      case "reconnecting":
+        return "Reconnecting...";
+      case "partnerDisconnected":
+        return "Partner disconnected";
+      default:
+        return "Connecting...";
+    }
+  };
+
   if (connectionState === "error") {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centerContainer}>
-          <Text style={styles.errorTitle}>Unable to Connect</Text>
-          <Text style={styles.errorSubtitle}>{errorMessage || "Failed to join peer call."}</Text>
-          <TouchableOpacity style={styles.primaryButton} onPress={() => router.replace("/(tabs)")}>
-            <Text style={styles.primaryButtonText}>Back to Home</Text>
-          </TouchableOpacity>
+          <Ionicons name="alert-circle" size={48} color={colors.danger} />
+          <AppText variant="titleLarge" color={colors.textPrimary} style={styles.errorTitle}>
+            Unable to Connect
+          </AppText>
+          <AppText variant="body" color={colors.textSecondary} style={styles.errorSubtitle}>
+            {errorMessage || "Failed to join peer call."}
+          </AppText>
+          <Button title="Back to Home" onPress={() => router.replace("/(tabs)")} />
         </View>
       </SafeAreaView>
     );
@@ -314,40 +331,42 @@ export default function PeerSessionScreen() {
                 : styles.statusDotYellow,
             ]}
           />
-          <Text style={styles.statusText}>
-            {connectionState === "connected"
-              ? "Live Call"
-              : connectionState === "waitingForPartner"
-              ? "Waiting for partner..."
-              : connectionState === "reconnecting"
-              ? "Reconnecting..."
-              : connectionState === "partnerDisconnected"
-              ? "Partner disconnected"
-              : "Connecting..."}
-          </Text>
+          <AppText variant="captionMedium" color={colors.textPrimary}>
+            {renderStatus()}
+          </AppText>
         </View>
 
         <TouchableOpacity
           style={styles.safetyButton}
           onPress={() => setShowSafetyModal(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Open safety options"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Text style={styles.safetyButtonText}>🛡️ Safety</Text>
+          <Ionicons name="shield-checkmark-outline" size={16} color={colors.danger} />
+          <AppText variant="captionMedium" color={colors.danger} style={styles.safetyButtonText}>
+            Safety
+          </AppText>
         </TouchableOpacity>
       </View>
 
       {/* Center Call Info */}
       <View style={styles.centerContent}>
         <View style={styles.partnerAvatar}>
-          <Text style={styles.partnerAvatarText}>👤</Text>
+          <Ionicons name="person" size={54} color={colors.textSecondary} />
         </View>
-        <Text style={styles.partnerName}>Practice Partner</Text>
-        <Text style={styles.subtext}>English Conversation Practice</Text>
+        <AppText variant="titleLarge" color={colors.textPrimary} style={styles.partnerName}>
+          Practice Partner
+        </AppText>
+        <AppText variant="caption" color={colors.textSecondary} style={styles.subtext}>
+          1-on-1 English Conversation Practice
+        </AppText>
 
         <View style={styles.timerBadge}>
-          <Text style={styles.timerText}>
+          <Ionicons name="time-outline" size={16} color={colors.textSecondary} style={styles.timerIcon} />
+          <AppText variant="title" color={colors.textPrimary}>
             {formatTime(elapsedSeconds)} / {formatTime(maxAllowedSecs)}
-          </Text>
+          </AppText>
         </View>
       </View>
 
@@ -356,37 +375,63 @@ export default function PeerSessionScreen() {
         <TouchableOpacity
           style={[styles.controlButton, isMuted && styles.controlButtonMuted]}
           onPress={handleToggleMute}
+          accessibilityRole="button"
+          accessibilityLabel={isMuted ? "Unmute microphone" : "Mute microphone"}
         >
-          <Text style={styles.controlIcon}>{isMuted ? "🔇" : "🎙️"}</Text>
-          <Text style={styles.controlLabel}>{isMuted ? "Unmute" : "Mute"}</Text>
+          <Ionicons
+            name={isMuted ? "mic-off" : "mic"}
+            size={24}
+            color={isMuted ? colors.danger : colors.textPrimary}
+          />
+          <AppText
+            variant="micro"
+            color={isMuted ? colors.danger : colors.textPrimary}
+            style={styles.controlLabel}
+          >
+            {isMuted ? "Unmute" : "Mute"}
+          </AppText>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.endCallButton} onPress={confirmLeave}>
-          <Text style={styles.endCallIcon}>✕</Text>
-          <Text style={styles.endCallLabel}>End</Text>
+        <TouchableOpacity
+          style={styles.endCallButton}
+          onPress={confirmLeave}
+          accessibilityRole="button"
+          accessibilityLabel="End peer call"
+        >
+          <Ionicons name="call" size={24} color={colors.textInverse} />
+          <AppText variant="micro" color={colors.textInverse} style={styles.endCallLabel}>
+            End Call
+          </AppText>
         </TouchableOpacity>
       </View>
 
-      {/* Moderation Modal */}
+      {/* Moderation & Safety Modal */}
       <Modal visible={showSafetyModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Safety & Moderation</Text>
-            <Text style={styles.modalSubtitle}>
-              Help us maintain a respectful practice environment.
-            </Text>
+            <AppText variant="title" color={colors.textPrimary}>
+              Safety & Moderation
+            </AppText>
+            <AppText variant="caption" color={colors.textSecondary} style={styles.modalSubtitle}>
+              Help us maintain a respectful and safe practice environment.
+            </AppText>
 
             {actionSuccessMessage && (
               <View style={styles.successBanner}>
-                <Text style={styles.successBannerText}>{actionSuccessMessage}</Text>
+                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                <AppText variant="captionMedium" color={colors.success} style={styles.successBannerText}>
+                  {actionSuccessMessage}
+                </AppText>
               </View>
             )}
 
-            <Text style={styles.inputLabel}>Reason for Report</Text>
+            <AppText variant="micro" color={colors.textSecondary} style={styles.inputLabel}>
+              REASON FOR REPORT
+            </AppText>
             {[
               { id: "HARASSMENT", label: "Harassment or bullying" },
               { id: "INAPPROPRIATE_BEHAVIOR", label: "Inappropriate behavior" },
-              { id: "AUDIO_QUALITY", label: "Audio quality / Noise" },
+              { id: "AUDIO_QUALITY", label: "Audio quality or excessive noise" },
               { id: "OTHER", label: "Other issue" },
             ].map((opt) => (
               <TouchableOpacity
@@ -397,48 +442,54 @@ export default function PeerSessionScreen() {
                 ]}
                 onPress={() => setReportReason(opt.id)}
               >
-                <Text
-                  style={[
-                    styles.optionText,
-                    reportReason === opt.id && styles.optionTextSelected,
-                  ]}
+                <Ionicons
+                  name={reportReason === opt.id ? "radio-button-on" : "radio-button-off"}
+                  size={18}
+                  color={reportReason === opt.id ? colors.accent : colors.textTertiary}
+                  style={styles.radioIcon}
+                />
+                <AppText
+                  variant="body"
+                  color={reportReason === opt.id ? colors.textPrimary : colors.textSecondary}
+                  style={reportReason === opt.id ? styles.optionTextSelected : undefined}
                 >
                   {opt.label}
-                </Text>
+                </AppText>
               </TouchableOpacity>
             ))}
 
             <TextInput
               style={styles.textInput}
               placeholder="Optional details (max 300 characters)"
+              placeholderTextColor={colors.textTertiary}
               value={reportDetails}
               onChangeText={setReportDetails}
               maxLength={300}
               multiline
             />
 
-            <TouchableOpacity
-              style={styles.submitReportButton}
+            <Button
+              title="Submit Report"
+              variant="danger"
+              loading={isSubmittingModeration}
               onPress={handleReportPartner}
-              disabled={isSubmittingModeration}
-            >
-              {isSubmittingModeration ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.submitReportText}>Submit Report</Text>
-              )}
-            </TouchableOpacity>
+              style={styles.submitReportButton}
+            />
 
-            <TouchableOpacity style={styles.blockPartnerButton} onPress={handleBlockPartner}>
-              <Text style={styles.blockPartnerText}>🚫 Block Partner</Text>
-            </TouchableOpacity>
+            <Button
+              title="Block Partner"
+              variant="secondary"
+              icon={<Ionicons name="ban" size={18} color={colors.danger} />}
+              onPress={handleBlockPartner}
+              style={styles.blockPartnerButton}
+            />
 
-            <TouchableOpacity
-              style={styles.cancelModalButton}
+            <Button
+              title="Cancel"
+              variant="ghost"
               onPress={() => setShowSafetyModal(false)}
-            >
-              <Text style={styles.cancelModalText}>Cancel</Text>
-            </TouchableOpacity>
+              style={styles.cancelModalButton}
+            />
           </View>
         </View>
       </Modal>
@@ -449,24 +500,26 @@ export default function PeerSessionScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#111827",
+    backgroundColor: colors.background,
   },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 12 : 14,
-    paddingBottom: 14,
+    paddingHorizontal: spacing.lg,
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 12 : spacing.md,
+    paddingBottom: spacing.md,
   },
-
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    paddingHorizontal: 12,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: radius.full,
+    ...shadows.subtle,
   },
   statusDot: {
     width: 8,
@@ -475,250 +528,186 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   statusDotGreen: {
-    backgroundColor: "#10B981",
+    backgroundColor: colors.success,
   },
   statusDotYellow: {
-    backgroundColor: "#F59E0B",
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#F3F4F6",
+    backgroundColor: colors.warning,
   },
   safetyButton: {
-    backgroundColor: "rgba(239, 68, 68, 0.2)",
-    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.dangerSubtle,
+    paddingHorizontal: spacing.md,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: "#FECACA",
   },
   safetyButtonText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#F87171",
+    marginLeft: 4,
   },
   centerContent: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.xl,
   },
   partnerAvatar: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: colors.surfaceMuted,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: "rgba(16, 185, 129, 0.3)",
-  },
-  partnerAvatarText: {
-    fontSize: 54,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   partnerName: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    marginBottom: 6,
+    marginBottom: 4,
   },
   subtext: {
-    fontSize: 14,
-    color: "#9CA3AF",
-    marginBottom: 28,
+    marginBottom: spacing.xl,
   },
   timerBadge: {
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 999,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    ...shadows.subtle,
   },
-  timerText: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#10B981",
-    fontVariant: ["tabular-nums"],
+  timerIcon: {
+    marginRight: spacing.xs,
   },
   bottomControls: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    gap: 36,
-    paddingBottom: 48,
+    gap: spacing.xxl,
+    paddingBottom: spacing.xxxl,
   },
   controlButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     justifyContent: "center",
     alignItems: "center",
+    ...shadows.subtle,
   },
   controlButtonMuted: {
-    backgroundColor: "#EF4444",
-  },
-  controlIcon: {
-    fontSize: 26,
-    color: "#FFFFFF",
+    backgroundColor: colors.dangerSubtle,
+    borderColor: "#FECACA",
   },
   controlLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#E5E7EB",
     marginTop: 2,
   },
   endCallButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "#DC2626",
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: colors.danger,
     justifyContent: "center",
     alignItems: "center",
-  },
-  endCallIcon: {
-    fontSize: 26,
-    color: "#FFFFFF",
-    fontWeight: "800",
+    ...shadows.medium,
   },
   endCallLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#FFFFFF",
     marginTop: 2,
   },
   centerContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   errorTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    marginBottom: 10,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
   },
   errorSubtitle: {
-    fontSize: 15,
-    color: "#9CA3AF",
     textAlign: "center",
-    marginBottom: 32,
-  },
-  primaryButton: {
-    backgroundColor: "#10B981",
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 14,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "700",
+    marginBottom: spacing.xl,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "flex-end",
   },
   modalCard: {
-    backgroundColor: "#1F2937",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    marginBottom: 4,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl,
+    ...shadows.medium,
   },
   modalSubtitle: {
-    fontSize: 13,
-    color: "#9CA3AF",
-    marginBottom: 20,
+    marginTop: 4,
+    marginBottom: spacing.lg,
   },
   successBanner: {
-    backgroundColor: "rgba(16, 185, 129, 0.2)",
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.successSubtle,
+    borderColor: "#A7F3D0",
+    borderWidth: 1,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    marginBottom: spacing.md,
   },
   successBannerText: {
-    color: "#10B981",
-    fontSize: 13,
-    fontWeight: "600",
+    marginLeft: spacing.xs,
   },
   inputLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#9CA3AF",
-    textTransform: "uppercase",
-    marginBottom: 10,
+    marginBottom: spacing.xs,
   },
   optionRow: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 12,
     paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    marginBottom: 8,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
+    marginBottom: spacing.xs,
   },
   optionRowSelected: {
-    backgroundColor: "rgba(16, 185, 129, 0.2)",
+    backgroundColor: colors.accentSubtle,
     borderWidth: 1,
-    borderColor: "#10B981",
+    borderColor: colors.accent,
   },
-  optionText: {
-    fontSize: 14,
-    color: "#D1D5DB",
-    fontWeight: "500",
+  radioIcon: {
+    marginRight: spacing.sm,
   },
   optionTextSelected: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-  },
-  textInput: {
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    borderRadius: 10,
-    padding: 12,
-    color: "#FFFFFF",
-    fontSize: 14,
-    marginTop: 8,
-    marginBottom: 16,
-    minHeight: 64,
-    textAlignVertical: "top",
-  },
-  submitReportButton: {
-    backgroundColor: "#EF4444",
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  submitReportText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  blockPartnerButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  blockPartnerText: {
-    color: "#F87171",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  cancelModalButton: {
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  cancelModalText: {
-    color: "#9CA3AF",
-    fontSize: 15,
     fontWeight: "600",
   },
+  textInput: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    color: colors.textPrimary,
+    fontSize: 14,
+    marginTop: spacing.xs,
+    marginBottom: spacing.md,
+    minHeight: 64,
+    textAlignVertical: "top",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  submitReportButton: {
+    width: "100%",
+    marginBottom: spacing.xs,
+  },
+  blockPartnerButton: {
+    width: "100%",
+    marginBottom: spacing.xs,
+  },
+  cancelModalButton: {
+    width: "100%",
+  },
 });
-

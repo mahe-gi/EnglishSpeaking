@@ -1,10 +1,13 @@
 import React, { useState } from "react";
 import { View, StyleSheet, ScrollView, TouchableOpacity, Modal } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "../../components/Screen";
 import { AppText } from "../../components/AppText";
 import { Button } from "../../components/Button";
+import { StatusBadge } from "../../components/StatusBadge";
 import { useAuth } from "../../hooks/useAuth";
+import { colors, radius, spacing, shadows } from "../../theme";
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -55,7 +58,7 @@ export default function ProfileScreen() {
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <AppText variant="title" weight="semibold">
+          <AppText variant="display" color={colors.textPrimary}>
             Profile
           </AppText>
         </View>
@@ -63,27 +66,20 @@ export default function ProfileScreen() {
         {/* Account Info Card */}
         <View style={styles.accountCard}>
           <View style={styles.avatarCircle}>
-            <AppText variant="title" color="#FFFFFF">
-              {user?.displayName ? user.displayName.charAt(0).toUpperCase() : isAnonymous ? "G" : "U"}
-            </AppText>
+            <Ionicons name="person" size={26} color={colors.textInverse} />
           </View>
           <View style={styles.accountDetails}>
-            <AppText variant="subtitle" weight="semibold" color="#111827">
+            <AppText variant="title" color={colors.textPrimary}>
               {isAnonymous ? "Guest Learner" : user?.displayName || "Learner"}
             </AppText>
-            <AppText variant="caption" color="#6B7280">
-              {isAnonymous ? "Anonymous Preview" : user?.email || "Google Account"}
+            <AppText variant="caption" color={colors.textSecondary}>
+              {isAnonymous ? "Anonymous Device Preview" : user?.email || "Google Verified"}
             </AppText>
             <View style={styles.badgeContainer}>
-              <View style={styles.planBadge}>
-                <AppText variant="caption" weight="medium" color="#4B5563">
-                  {productState === "GUEST"
-                    ? "Guest Mode"
-                    : productState === "PREMIUM"
-                    ? "⭐ Premium"
-                    : "✓ Free Account"}
-                </AppText>
-              </View>
+              <StatusBadge
+                label={productState === "PREMIUM" ? "PREMIUM" : productState === "FREE" ? "FREE ACCOUNT" : "GUEST PREVIEW"}
+                variant={productState === "PREMIUM" ? "accent" : productState === "FREE" ? "success" : "neutral"}
+              />
             </View>
           </View>
         </View>
@@ -91,11 +87,14 @@ export default function ProfileScreen() {
         {/* Guest Upgrade CTA */}
         {isAnonymous && (
           <View style={styles.guestCtaCard}>
-            <AppText variant="body" weight="semibold" color="#111827">
-              Create an account
+            <View style={styles.guestIconCircle}>
+              <Ionicons name="sparkles" size={20} color={colors.accent} />
+            </View>
+            <AppText variant="title" color={colors.textPrimary}>
+              Sign In with Google
             </AppText>
-            <AppText variant="caption" color="#4B5563" style={styles.guestCtaText}>
-              Sign in with Google to save your history, personalize your topics, and unlock peer practice.
+            <AppText variant="caption" align="center" color={colors.textSecondary} style={styles.guestCtaText}>
+              Save your speaking history, personalize your topics, and unlock 1-on-1 peer practice.
             </AppText>
             <Button
               title="Continue with Google"
@@ -112,20 +111,23 @@ export default function ProfileScreen() {
             style={styles.optionRow}
             activeOpacity={0.7}
             onPress={handlePersonalizePress}
+            accessibilityRole="button"
+            accessibilityLabel="Personalize my practice"
           >
+            <View style={styles.optionIconContainer}>
+              <Ionicons name="options-outline" size={20} color={colors.textPrimary} />
+            </View>
             <View style={styles.optionTextContainer}>
-              <AppText variant="body" weight="medium" color="#111827">
-                Personalize my practice
+              <AppText variant="bodyMedium" color={colors.textPrimary}>
+                Personalize practice
               </AppText>
-              <AppText variant="caption" color="#6B7280">
+              <AppText variant="caption" color={colors.textSecondary}>
                 {profile?.careerStatus
-                  ? `${profile.careerStatus.replace("_", " ")} · ${profile.goal?.replace("_", " ")}`
+                  ? `${profile.careerStatus.replace("_", " ")} • ${profile.goal?.replace("_", " ")}`
                   : "Target role, native language, and goals"}
               </AppText>
             </View>
-            <AppText variant="body" color="#9CA3AF">
-              →
-            </AppText>
+            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
           </TouchableOpacity>
 
           <View style={styles.rowDivider} />
@@ -134,18 +136,21 @@ export default function ProfileScreen() {
             style={styles.optionRow}
             activeOpacity={0.7}
             onPress={handleSnapshotPress}
+            accessibilityRole="button"
+            accessibilityLabel="Speaking baseline snapshot"
           >
+            <View style={styles.optionIconContainer}>
+              <Ionicons name="stats-chart-outline" size={20} color={colors.textPrimary} />
+            </View>
             <View style={styles.optionTextContainer}>
-              <AppText variant="body" weight="medium" color="#111827">
+              <AppText variant="bodyMedium" color={colors.textPrimary}>
                 Speaking Snapshot
               </AppText>
-              <AppText variant="caption" color="#6B7280">
-                {speakingCheckCompleted ? "View speaking snapshot report" : "Take optional speaking check"}
+              <AppText variant="caption" color={colors.textSecondary}>
+                {speakingCheckCompleted ? "View speaking baseline report" : "Take 3-minute speaking check"}
               </AppText>
             </View>
-            <AppText variant="body" color="#9CA3AF">
-              →
-            </AppText>
+            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
           </TouchableOpacity>
         </View>
 
@@ -155,6 +160,7 @@ export default function ProfileScreen() {
             <Button
               title="Sign Out"
               variant="outline"
+              icon={<Ionicons name="log-out-outline" size={18} color={colors.textPrimary} />}
               onPress={handleSignOutPress}
               style={styles.signOutButton}
             />
@@ -166,23 +172,26 @@ export default function ProfileScreen() {
       <Modal visible={showSignOutModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <AppText variant="title" weight="semibold" style={styles.modalTitle}>
+            <View style={[styles.modalIconContainer, { backgroundColor: colors.dangerSubtle }]}>
+              <Ionicons name="log-out-outline" size={32} color={colors.danger} />
+            </View>
+            <AppText variant="title" align="center" color={colors.textPrimary}>
               Sign out?
             </AppText>
-            <AppText variant="body" color="#4B5563" style={styles.modalBody}>
-              You&apos;ll return to guest mode on this device.
+            <AppText variant="body" align="center" color={colors.textSecondary} style={styles.modalBody}>
+              You will return to guest mode on this device.
             </AppText>
 
             <Button
               title="Sign out"
-              variant="primary"
+              variant="danger"
               onPress={handleConfirmSignOut}
               style={styles.modalButton}
             />
 
             <Button
               title="Cancel"
-              variant="outline"
+              variant="ghost"
               onPress={() => setShowSignOutModal(false)}
               style={styles.modalCancelButton}
             />
@@ -194,11 +203,14 @@ export default function ProfileScreen() {
       <Modal visible={showPersonalizeModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <AppText variant="title" weight="semibold" style={styles.modalTitle}>
+            <View style={styles.modalIconContainer}>
+              <Ionicons name="sparkles" size={32} color={colors.accent} />
+            </View>
+            <AppText variant="title" align="center" color={colors.textPrimary}>
               Sign in to personalize
             </AppText>
-            <AppText variant="body" color="#4B5563" style={styles.modalBody}>
-              Sign in with Google to save your career status, native language, and interview goals.
+            <AppText variant="body" align="center" color={colors.textSecondary} style={styles.modalBody}>
+              Sign in with Google to save your career status, native language, and goals.
             </AppText>
 
             <Button
@@ -213,7 +225,7 @@ export default function ProfileScreen() {
 
             <Button
               title="Not now"
-              variant="outline"
+              variant="ghost"
               onPress={() => setShowPersonalizeModal(false)}
               style={styles.modalCancelButton}
             />
@@ -226,28 +238,29 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    paddingVertical: 24,
-    gap: 16,
+    paddingVertical: spacing.xl,
+    gap: spacing.lg,
   },
   header: {
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
   },
   accountCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E5E7EB",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
+    gap: spacing.md,
+    ...shadows.subtle,
   },
   avatarCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "#111827",
+    width: 52,
+    height: 52,
+    borderRadius: radius.full,
+    backgroundColor: colors.brand,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -256,41 +269,49 @@ const styles = StyleSheet.create({
   },
   badgeContainer: {
     flexDirection: "row",
-    marginTop: 6,
-  },
-  planBadge: {
-    backgroundColor: "#F3F4F6",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
+    marginTop: spacing.xs,
   },
   guestCtaCard: {
-    backgroundColor: "#F9FAFB",
-    borderColor: "#E5E7EB",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 20,
-    gap: 8,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    alignItems: "center",
+    gap: spacing.xs,
+    ...shadows.subtle,
+  },
+  guestIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    backgroundColor: colors.accentSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
   },
   guestCtaText: {
     lineHeight: 18,
-    marginBottom: 8,
+    marginBottom: spacing.xs,
   },
   signInButton: {
     width: "100%",
   },
   sectionContainer: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E5E7EB",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     overflow: "hidden",
+    ...shadows.subtle,
   },
   optionRow: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
-    justifyContent: "space-between",
+    padding: spacing.lg,
+  },
+  optionIconContainer: {
+    marginRight: spacing.md,
   },
   optionTextContainer: {
     flex: 1,
@@ -298,37 +319,42 @@ const styles = StyleSheet.create({
   },
   rowDivider: {
     height: 1,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: colors.borderSubtle,
   },
   footerContainer: {
-    marginTop: 16,
+    marginTop: spacing.sm,
   },
   signOutButton: {
     width: "100%",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   modalCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
     width: "100%",
     maxWidth: 360,
     alignItems: "center",
-    gap: 12,
+    gap: spacing.md,
+    ...shadows.medium,
   },
-  modalTitle: {
-    textAlign: "center",
+  modalIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.full,
+    backgroundColor: colors.accentSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
   },
   modalBody: {
-    textAlign: "center",
-    lineHeight: 20,
-    marginBottom: 8,
+    marginBottom: spacing.xs,
   },
   modalButton: {
     width: "100%",
@@ -337,3 +363,4 @@ const styles = StyleSheet.create({
     width: "100%",
   },
 });
+

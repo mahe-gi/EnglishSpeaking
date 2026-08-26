@@ -1,11 +1,14 @@
 import React, { useState } from "react";
 import { View, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "../components/Screen";
 import { AppText } from "../components/AppText";
 import { Button } from "../components/Button";
+import { IconButton } from "../components/IconButton";
 import { useAuth } from "../hooks/useAuth";
 import { submitOnboarding } from "../lib/api";
+import { colors, radius, spacing, shadows } from "../theme";
 
 type CareerStatus = "COLLEGE_STUDENT" | "JOB_SEEKER" | "WORKING_PROFESSIONAL";
 type Goal = "JOB_INTERVIEWS" | "WORKPLACE_CONVERSATIONS" | "SPEAKING_CONFIDENCE";
@@ -84,12 +87,14 @@ export default function PersonalizeScreen() {
   return (
     <Screen>
       <View style={styles.topHeader}>
-        <TouchableOpacity style={styles.backButton} onPress={handleClose}>
-          <AppText variant="body" weight="medium" color="#4B5563">
-            ✕ Close
-          </AppText>
-        </TouchableOpacity>
-        <AppText variant="subtitle" weight="semibold">
+        <IconButton
+          icon={<Ionicons name="close" size={22} color={colors.textPrimary} />}
+          accessibilityLabel="Close personalization"
+          onPress={handleClose}
+          variant="surface"
+          size={40}
+        />
+        <AppText variant="subtitle" color={colors.textPrimary}>
           Personalize Practice
         </AppText>
         <View style={styles.placeholderRight} />
@@ -98,7 +103,8 @@ export default function PersonalizeScreen() {
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         {error && (
           <View style={styles.errorCard}>
-            <AppText variant="body" color="#B91C1C">
+            <Ionicons name="alert-circle" size={18} color={colors.danger} />
+            <AppText variant="caption" color={colors.danger} style={styles.errorText}>
               {error}
             </AppText>
           </View>
@@ -106,8 +112,8 @@ export default function PersonalizeScreen() {
 
         {/* Section 1: Career Status */}
         <View style={styles.section}>
-          <AppText variant="body" weight="semibold" style={styles.sectionTitle}>
-            Current Stage
+          <AppText variant="micro" color={colors.textSecondary} style={styles.sectionTitle}>
+            CURRENT STAGE
           </AppText>
           <View style={styles.optionList}>
             {CAREER_OPTIONS.map((opt) => (
@@ -118,11 +124,18 @@ export default function PersonalizeScreen() {
                   careerStatus === opt.value && styles.optionSelected,
                 ]}
                 onPress={() => setCareerStatus(opt.value)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: careerStatus === opt.value }}
               >
+                <Ionicons
+                  name={careerStatus === opt.value ? "radio-button-on" : "radio-button-off"}
+                  size={20}
+                  color={careerStatus === opt.value ? colors.accent : colors.textTertiary}
+                  style={styles.radioIcon}
+                />
                 <AppText
-                  variant="body"
-                  weight={careerStatus === opt.value ? "semibold" : "regular"}
-                  color={careerStatus === opt.value ? "#111827" : "#4B5563"}
+                  variant="bodyMedium"
+                  color={careerStatus === opt.value ? colors.textPrimary : colors.textSecondary}
                 >
                   {opt.label}
                 </AppText>
@@ -133,8 +146,8 @@ export default function PersonalizeScreen() {
 
         {/* Section 2: Speaking Goal */}
         <View style={styles.section}>
-          <AppText variant="body" weight="semibold" style={styles.sectionTitle}>
-            Primary Speaking Goal
+          <AppText variant="micro" color={colors.textSecondary} style={styles.sectionTitle}>
+            PRIMARY SPEAKING GOAL
           </AppText>
           <View style={styles.optionList}>
             {GOAL_OPTIONS.map((opt) => (
@@ -145,11 +158,18 @@ export default function PersonalizeScreen() {
                   goal === opt.value && styles.optionSelected,
                 ]}
                 onPress={() => setGoal(opt.value)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: goal === opt.value }}
               >
+                <Ionicons
+                  name={goal === opt.value ? "radio-button-on" : "radio-button-off"}
+                  size={20}
+                  color={goal === opt.value ? colors.accent : colors.textTertiary}
+                  style={styles.radioIcon}
+                />
                 <AppText
-                  variant="body"
-                  weight={goal === opt.value ? "semibold" : "regular"}
-                  color={goal === opt.value ? "#111827" : "#4B5563"}
+                  variant="bodyMedium"
+                  color={goal === opt.value ? colors.textPrimary : colors.textSecondary}
                 >
                   {opt.label}
                 </AppText>
@@ -160,8 +180,8 @@ export default function PersonalizeScreen() {
 
         {/* Section 3: Native Language */}
         <View style={styles.section}>
-          <AppText variant="body" weight="semibold" style={styles.sectionTitle}>
-            Native Language
+          <AppText variant="micro" color={colors.textSecondary} style={styles.sectionTitle}>
+            NATIVE LANGUAGE
           </AppText>
           <View style={styles.languageGrid}>
             {LANGUAGE_OPTIONS.map((opt) => (
@@ -172,11 +192,12 @@ export default function PersonalizeScreen() {
                   nativeLanguage === opt.value && styles.languageChipSelected,
                 ]}
                 onPress={() => setNativeLanguage(opt.value)}
+                accessibilityRole="button"
+                accessibilityLabel={opt.label}
               >
                 <AppText
-                  variant="caption"
-                  weight={nativeLanguage === opt.value ? "semibold" : "regular"}
-                  color={nativeLanguage === opt.value ? "#111827" : "#4B5563"}
+                  variant="captionMedium"
+                  color={nativeLanguage === opt.value ? colors.textPrimary : colors.textSecondary}
                 >
                   {opt.label}
                 </AppText>
@@ -202,64 +223,76 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 12,
-  },
-  backButton: {
-    padding: 8,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   placeholderRight: {
-    width: 48,
+    width: 40,
   },
   container: {
-    paddingVertical: 16,
-    gap: 20,
+    paddingVertical: spacing.lg,
+    gap: spacing.xl,
   },
   errorCard: {
-    backgroundColor: "#FEF2F2",
-    borderColor: "#FCA5A5",
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.dangerSubtle,
+    borderColor: "#FECACA",
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  errorText: {
+    marginLeft: spacing.xs,
   },
   section: {
-    gap: 10,
+    gap: spacing.sm,
   },
   sectionTitle: {
-    fontSize: 15,
+    marginBottom: spacing.xxs,
   },
   optionList: {
-    gap: 8,
+    gap: spacing.xs,
   },
   optionButton: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E5E7EB",
-    borderWidth: 1.5,
-    borderRadius: 12,
-    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    ...shadows.subtle,
   },
   optionSelected: {
-    borderColor: "#111827",
-    backgroundColor: "#F9FAFB",
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSubtle,
+  },
+  radioIcon: {
+    marginRight: spacing.sm,
   },
   languageGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: spacing.xs,
   },
   languageChip: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E5E7EB",
-    borderWidth: 1.5,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    ...shadows.subtle,
   },
   languageChipSelected: {
-    borderColor: "#111827",
-    backgroundColor: "#F9FAFB",
+    backgroundColor: colors.accentSubtle,
+    borderColor: colors.accent,
   },
   saveButton: {
-    marginTop: 12,
-    marginBottom: 32,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xl,
   },
 });
+

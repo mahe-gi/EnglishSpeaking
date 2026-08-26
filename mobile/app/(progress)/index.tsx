@@ -9,6 +9,7 @@ import {
   SafeAreaView,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { auth } from "../../lib/firebase";
 import { getUserProgress, ProgressData } from "../../lib/api";
 
@@ -120,7 +121,7 @@ export default function ProgressScreen() {
 
           <View style={styles.comparisonItem}>
             <View style={styles.comparisonHeaderRow}>
-              <Text style={styles.comparisonMetricTitle}>⚡ Speaking Rate</Text>
+              <Text style={styles.comparisonMetricTitle}>Speaking Rate</Text>
               <Text style={styles.idealBadge}>Target: 110–150 WPM</Text>
             </View>
             <View style={styles.comparisonPillsRow}>
@@ -144,7 +145,7 @@ export default function ProgressScreen() {
 
           <View style={styles.comparisonItem}>
             <View style={styles.comparisonHeaderRow}>
-              <Text style={styles.comparisonMetricTitle}>🎯 Filler Word Rate</Text>
+              <Text style={styles.comparisonMetricTitle}>Filler Word Rate</Text>
               <Text style={styles.idealBadge}>Lower is better</Text>
             </View>
             <View style={styles.comparisonPillsRow}>
@@ -220,8 +221,10 @@ export default function ProgressScreen() {
               <TouchableOpacity
                 style={styles.startPracticeButton}
                 onPress={() => router.push("/(practice)")}
+                accessibilityRole="button"
+                accessibilityLabel="Start today's practice"
               >
-                <Text style={styles.startPracticeButtonText}>🎙️ Start Today&apos;s Practice</Text>
+                <Text style={styles.startPracticeButtonText}>Start Today&apos;s Practice</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -244,9 +247,9 @@ export default function ProgressScreen() {
                   <Text style={styles.historyTitle}>{session.scenarioTitle}</Text>
 
                   <View style={styles.historyStatsRow}>
-                    <Text style={styles.historyStatText}>⏱ {session.speakingSeconds}s speaking</Text>
+                    <Text style={styles.historyStatText}>{session.speakingSeconds}s speaking</Text>
                     <Text style={styles.historyStatDot}>•</Text>
-                    <Text style={styles.historyStatText}>⚡ {session.wpm} WPM</Text>
+                    <Text style={styles.historyStatText}>{session.wpm} WPM</Text>
                     <Text style={styles.historyStatDot}>•</Text>
                     {session.primaryFocusArea ? (
                       <View style={styles.historyFocusBadge}>

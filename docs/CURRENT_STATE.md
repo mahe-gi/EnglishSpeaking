@@ -3,61 +3,44 @@
 Last updated: August 26, 2026
 
 ### Current milestone
-Ntalo V2 — Phase 3 Instant Peer Practice Matching (Physical Runtime Acceptance Complete)
+Ntalo V2 — Production AI Fix & Complete Mobile UI/UX Design System Polish (Complete)
 
 ## Completed
 
-- **Ntalo V2: Phase 3 — Instant Peer Practice Matching & Realtime WebRTC Calls Complete:**
-  - **Matchmaking Engine & SERIALIZABLE Transactions (`backend/src/modules/peer/`):**
-    - `POST /api/v1/peer/matchmaking/join`: Atomic `SERIALIZABLE` queue pairing engine preventing duplicate matches, self-pairing, and race conditions.
-    - Strict Registered User + 18+ Age Confirmation guards.
-    - Quota-aware duration negotiation: `allowedSeconds = min(remainingA, remainingB, 900)`.
-    - Directional blocking and bidirectional rematch prevention ($A \rightarrow B$ or $B \rightarrow A$).
-    - Match-scoped opaque participant tokens (`peer_<matchId>_a`, `peer_<matchId>_b`).
-    - 45s search TTL with clean status reporting (`SEARCHING`, `MATCHED`, `TIMEOUT`, `CANCELLED`).
-  - **Authoritative LiveKit Webhooks & Usage Settlement (`backend/src/modules/peer/`):**
-    - Raw-body middleware with verified `WebhookReceiver` cryptographic signature check.
-    - Single participant connect remains `MATCHED` (`startedAt = null`, `deadlineAt = null`, no billing).
-    - Transition to `ACTIVE` with server `startedAt` occurs strictly when both participants connect.
-    - Webhook idempotency: repeated delivery preserves original `startedAt`.
-    - Single participant unbilled exit: transitions to `CANCELLED` with 0 billed seconds and 0 ledger rows.
-    - Session leave: server transitions to `COMPLETED`, setting `endedAt`, calculating `actualSeconds`, and creating exactly TWO `UsageLedger` rows with `idempotencyKey = peer:<matchId>:<userId>`.
-  - **Moderation & Safety (`reports` & `blocks`):**
-    - `POST /api/v1/peer/matches/:id/report`: Server resolves `reportedUserId` from match. Report alone does not block.
-    - `POST /api/v1/peer/matches/:id/block`: Directional block created, immediately terminating rematchability.
-  - **Mobile Peer Practice Experience (`mobile/app/(peer)/`):**
-    - Matchmaking radar & search timeout screen with retry & AI fallback.
-    - Realtime WebRTC audio call screen via `@livekit/react-native` and `livekit-client`.
-    - Connection states: `Connecting...`, `Waiting for partner...`, `Live Call`, `Partner disconnected`.
-    - Live countdown timer, microphone mute/unmute, Safety & Moderation modal, and End Call.
-  - **Two-User Physical Android Acceptance (`9XPBUS7XM7CI6X9L` + Second Client):**
-    - User A (physical Android) joins queue $\rightarrow$ `SEARCHING`: PASS
-    - User B joins $\rightarrow$ atomic pairing into single `PeerMatch`: PASS
-    - Single participant waiting $\rightarrow$ `MATCHED`, `startedAt = null`, no billing: PASS
-    - Second participant connects $\rightarrow$ genuine WebRTC activation $\rightarrow$ `ACTIVE`: PASS
-    - Live bidirectional audio exchange: PASS
-    - Mute/Unmute microphone toggle: PASS
-    - Report partner $\rightarrow$ server-resolved Report row without block: PASS
-    - Block partner $\rightarrow$ Block row created and rematch blocked in both directions: PASS
-    - Leave call $\rightarrow$ `COMPLETED`, exact duration, and 2 `UsageLedger` rows: PASS
-    - 124/124 backend tests passing, 0 TypeScript errors across backend & mobile.
+- **1. Production AI Fix ("Talk with AI" / LiveKit Agent Worker):**
+  - **Worker Dependency Resolution (`agent/package.json`):** Moved `tsx` and `typescript` from `devDependencies` to `dependencies` so production builds (`npm install --omit=dev`) contain runtime executables.
+  - **Containerized Agent (`agent/Dockerfile`):** Added production Dockerfile based on `node:22-bookworm-slim` for consistent container deployment in DigitalOcean.
+  - **LiveKit Agent Dispatch Contract:** Explicit dispatch on `agentName: "ntalo-voice-poc"` aligned across backend, worker, and LiveKit Cloud.
+  - **AI Voice Call Screen Resilience (`mobile/app/voice.tsx`):** Added explicit 18s connection timeout, participant join detection, and graceful fallback UI.
 
+- **2. Coherent Ntalo Design System (`mobile/theme/` & `mobile/components/`):**
+  - **Design Tokens:** Defined semantic tokens for `colors` (slate/zinc palette, brand accent #2563EB, status colors), `typography` (inter-scale with explicit lineHeight and fontWeights), `spacing` (4px grid), `radius` (4px to full), and `shadows`.
+  - **Component Primitives:** Implemented accessible, reusable primitives: `AppText`, `Button`, `IconButton`, `StatusBadge`, `Card`, `Screen`.
 
-- **Ntalo V2: Phase 0 & Phase 1 — Guest-First Architecture & P0/P1 Hardening:**
-  - P0-1 Auth Merge Security Bypass Fixed.
-  - P1-1 Atomic Single-Transaction Merge Claiming.
-  - P1-2 Preserved Source Tombstone.
-  - P1-3 Strict Installation ID Guest Entitlements.
-  - P1-4 Dedicated Speaking Check & Snapshot Routing.
-  - P1-5 Personalization Standalone Flow.
+- **3. Complete Removal of Emojis & Replacement with Vector Icons:**
+  - **Emoji Audit:** Ran comprehensive AST/regex audit across all `.ts`/`.tsx` files in `mobile/app` and `mobile/components`. Total emojis found: **0**.
+  - **Vector Icons:** Standardized on `@expo/vector-icons` (`Ionicons`) with consistent sizing, colors, and accessibility attributes.
+
+- **4. Screen-by-Screen UI/UX Polish:**
+  - **Tabs Layout (`(tabs)/_layout.tsx`):** Tab bar icons replaced with active/inactive vector icons and clean typography.
+  - **Home Screen (`(tabs)/index.tsx`):** Redesigned hero card, dual primary actions (AI Voice practice & Peer practice), clear guest/registered status, and polished modal dialogs.
+  - **AI Voice Call Screen (`voice.tsx`):** Ambient breathing voice orb with Reanimated, real-time connection states, vector controls (mute, end call), and connection timeout fallback.
+  - **Peer Matchmaking Screen (`(peer)/index.tsx`):** Pulsing search radar, clear 45s search TTL, instant retry, and fallback to AI practice.
+  - **Peer Call Screen (`(peer)/session.tsx`):** Live timer, clean partner avatar, mute/end actions, and comprehensive Safety & Moderation modal.
+  - **Progress Tab (`(tabs)/progress.tsx` & `(progress)/index.tsx`):** Structured practice stats, baseline snapshot cards, WPM/filler metrics, and history list.
+  - **Profile Screen (`(tabs)/profile.tsx`):** Clean user avatar, subscription/plan badges, settings list with chevrons, and confirmation modals.
+  - **Speaking Check & Personalization (`speaking-check.tsx`, `personalize.tsx`):** Form controls with radio states, language chips, and clean modal dialogs.
+  - **Daily Practice (`(practice)/index.tsx`) & Assessment (`(assessment)/index.tsx`):** Clean audio recording controls, model answer suggestions, and coaching feedback cards.
+
+- **5. Phase 3 Instant Peer Practice Matching & Realtime WebRTC Calls:**
+  - Serialized matchmaking queue, authoritative LiveKit webhooks, 0-second unbilled cancellations, safety reporting, and two-user physical Android test verification.
 
 ## Currently working on
-Phase 3 Instant Peer Practice Matching Physical Acceptance Complete. Ready for Phase 4 (Progress, Feedback & Profile).
+Production AI Fix and Mobile UI/UX polish completed and verified.
 
 ## Next exact task
-1. Await user review of Phase 3 Two-User Physical Acceptance Report.
-2. Begin Phase 4: Progress, Practice History & Profile Insights.
-
+1. Trigger mobile preview build / test on physical device.
+2. Monitor production agent worker on DigitalOcean with LiveKit Cloud.
 
 Do not implement:
 - LiveKit video calls, screen sharing, group calls
@@ -72,30 +55,34 @@ None.
 None.
 
 ## Important decisions
-- Target identity for `completeMerge` requires verified `google.com` provider from Firebase Admin claims.
-- Guest trial limit (120s) is scoped strictly to persistent UUID `installationId`.
-- Timezone boundaries computed in `Asia/Kolkata` (UTC+5:30).
-- No mandatory onboarding questionnaire or mandatory baseline assessment gate on startup.
-- Ntalo does not intentionally persist raw realtime AI audio on mobile, backend storage, PostgreSQL, or Ntalo object storage. Audio is streamed through LiveKit/Sarvam for realtime processing.
+- Product UI is strictly emoji-free; all graphical indicators use `@expo/vector-icons` (`Ionicons`).
+- Agent internal API endpoints require `AGENT_INTERNAL_SECRET` header validation.
+- Mobile client tracks remote Agent participant presence before transitioning AI voice call to active state.
 
 ## Files changed recently
-- `agent/src/agent.ts`
-- `agent/src/backend-client.ts`
-- `agent/src/prompt.ts`
-- `backend/prisma/schema.prisma`
-- `backend/src/modules/users/entitlement.service.ts`
-- `backend/src/modules/voice/voice.service.ts`
-- `backend/src/modules/voice/voice.controller.ts`
-- `backend/src/modules/voice/voice.route.ts`
-- `backend/tests/voice.test.ts`
+- `agent/package.json`
+- `agent/Dockerfile`
+- `mobile/theme/*` (`colors.ts`, `typography.ts`, `spacing.ts`, `radius.ts`, `shadows.ts`, `index.ts`)
+- `mobile/components/*` (`AppText.tsx`, `Button.tsx`, `IconButton.tsx`, `StatusBadge.tsx`, `Card.tsx`, `Screen.tsx`)
+- `mobile/app/(tabs)/_layout.tsx`
+- `mobile/app/(tabs)/index.tsx`
+- `mobile/app/(tabs)/progress.tsx`
+- `mobile/app/(tabs)/profile.tsx`
 - `mobile/app/voice.tsx`
-- `mobile/lib/api.ts`
+- `mobile/app/(peer)/index.tsx`
+- `mobile/app/(peer)/session.tsx`
+- `mobile/app/speaking-check.tsx`
+- `mobile/app/personalize.tsx`
+- `mobile/app/(practice)/index.tsx`
+- `mobile/app/(assessment)/index.tsx`
+- `mobile/app/(progress)/index.tsx`
 - `docs/CURRENT_STATE.md`
 
 ## Last verified commands
-- `backend`: `npm test` (124 tests passing across 28 suites), `npx prisma validate`, `npx prisma migrate status`, `npm run typecheck`, `npm run lint`
+- `backend`: `npm test` (124 tests passing across 28 suites), `npm run typecheck`, `npm run lint`
 - `agent`: `npm run typecheck`, `npm run lint`
-- `mobile`: `npm run typecheck`, `npm run lint`
-- `web`: `npm run typecheck`, `npm run lint`, `npm run build`
+- `mobile`: `npx tsc --noEmit` (0 errors), AST emoji audit (0 emojis found)
+- `db`: `npx prisma migrate status` (Database schema up to date)
+
 
 

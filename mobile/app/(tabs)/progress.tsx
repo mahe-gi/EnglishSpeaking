@@ -1,10 +1,13 @@
 import React, { useState } from "react";
 import { View, StyleSheet, ScrollView, Modal } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "../../components/Screen";
 import { AppText } from "../../components/AppText";
 import { Button } from "../../components/Button";
+import { StatusBadge } from "../../components/StatusBadge";
 import { useAuth } from "../../hooks/useAuth";
+import { colors, radius, spacing, shadows } from "../../theme";
 
 export default function ProgressScreen() {
   const router = useRouter();
@@ -29,35 +32,35 @@ export default function ProgressScreen() {
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <AppText variant="title" weight="semibold">
+          <AppText variant="display" color={colors.textPrimary}>
             Progress
           </AppText>
-          <AppText variant="caption" color="#6B7280" style={styles.tagline}>
-            Your speaking practice and fluency overview
+          <AppText variant="subtitle" color={colors.textSecondary} style={styles.tagline}>
+            Your speaking practice and session history.
           </AppText>
         </View>
 
         {/* Today's Activity Card */}
         <View style={styles.card}>
-          <AppText variant="caption" weight="semibold" color="#6B7280" style={styles.cardLabel}>
-            TODAY
+          <AppText variant="micro" color={colors.textSecondary} style={styles.cardLabel}>
+            TODAY'S PRACTICE
           </AppText>
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <AppText variant="title" weight="semibold" color="#111827">
+              <AppText variant="titleLarge" color={colors.textPrimary}>
                 0 min
               </AppText>
-              <AppText variant="caption" color="#6B7280">
-                speaking
+              <AppText variant="caption" color={colors.textSecondary}>
+                Spoken Time
               </AppText>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <AppText variant="title" weight="semibold" color="#111827">
+              <AppText variant="titleLarge" color={colors.textPrimary}>
                 0
               </AppText>
-              <AppText variant="caption" color="#6B7280">
-                conversations
+              <AppText variant="caption" color={colors.textSecondary}>
+                Conversations
               </AppText>
             </View>
           </View>
@@ -65,23 +68,25 @@ export default function ProgressScreen() {
 
         {/* Speaking Check Card */}
         <View style={[styles.card, styles.speakingCheckCard]}>
-          <View style={styles.speakingCheckBadge}>
-            <AppText variant="caption" weight="medium" color={speakingCheckCompleted ? "#047857" : "#1D4ED8"}>
-              {speakingCheckCompleted ? "✓ Snapshot Saved" : "Optional Assessment"}
-            </AppText>
+          <View style={styles.badgeContainer}>
+            <StatusBadge
+              label={speakingCheckCompleted ? "SNAPSHOT SAVED" : "SPEAKING BASELINE"}
+              variant={speakingCheckCompleted ? "success" : "accent"}
+            />
           </View>
-          <AppText variant="subtitle" weight="semibold" color="#111827" style={styles.checkTitle}>
+          <AppText variant="title" color={colors.textPrimary} style={styles.checkTitle}>
             Speaking Check
           </AppText>
-          <AppText variant="body" color="#4B5563" style={styles.checkDescription}>
+          <AppText variant="body" color={colors.textSecondary} style={styles.checkDescription}>
             {speakingCheckCompleted
-              ? "Your speaking snapshot is saved. You can view your report or retake it anytime."
-              : "Want a clearer picture of your speaking clarity, pace, and structure? Take a 3-minute speaking check."}
+              ? "Your speaking baseline snapshot is saved. You can review your report or retake the check anytime."
+              : "Take a quick 3-minute speaking check to understand your pace, clarity, and structural confidence."}
           </AppText>
 
           <Button
             title={speakingCheckCompleted ? "View Snapshot" : "Start Speaking Check"}
             variant={speakingCheckCompleted ? "outline" : "primary"}
+            icon={<Ionicons name="stats-chart-outline" size={18} color={speakingCheckCompleted ? colors.textPrimary : colors.textInverse} />}
             onPress={handleSpeakingCheckPress}
             style={styles.checkButton}
           />
@@ -90,11 +95,14 @@ export default function ProgressScreen() {
         {/* Guest Progress Sync Banner */}
         {isAnonymous && (
           <View style={styles.guestSyncCard}>
-            <AppText variant="body" weight="semibold" color="#111827">
-              Keep your progress
+            <View style={styles.guestSyncIconCircle}>
+              <Ionicons name="cloud-upload-outline" size={24} color={colors.accent} />
+            </View>
+            <AppText variant="title" color={colors.textPrimary}>
+              Save Your Practice
             </AppText>
-            <AppText variant="caption" color="#4B5563" style={styles.guestSyncText}>
-              Sign in with Google to save your practice history and access peer practice.
+            <AppText variant="caption" align="center" color={colors.textSecondary} style={styles.guestSyncText}>
+              Sign in with Google to preserve your speaking progress, personal insights, and unlock 1-on-1 peer sessions.
             </AppText>
             <Button
               title="Continue with Google"
@@ -110,16 +118,14 @@ export default function ProgressScreen() {
       <Modal visible={showGoogleModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <View style={styles.modalBadge}>
-              <AppText variant="caption" weight="medium" color="#1D4ED8">
-                📊 Speaking Check
-              </AppText>
+            <View style={styles.modalIconContainer}>
+              <Ionicons name="stats-chart" size={32} color={colors.accent} />
             </View>
-            <AppText variant="title" weight="semibold" style={styles.modalTitle}>
-              Sign in for Speaking Check
+            <AppText variant="title" align="center" color={colors.textPrimary}>
+              Save Baseline Snapshot
             </AppText>
-            <AppText variant="body" color="#4B5563" style={styles.modalBody}>
-              Sign in with Google to take the 3-minute speaking check and save your baseline report.
+            <AppText variant="body" align="center" color={colors.textSecondary} style={styles.modalBody}>
+              Sign in with Google to complete your speaking check and save your baseline progress report.
             </AppText>
 
             <Button
@@ -134,7 +140,7 @@ export default function ProgressScreen() {
 
             <Button
               title="Not now"
-              variant="outline"
+              variant="ghost"
               onPress={() => setShowGoogleModal(false)}
               style={styles.modalCancelButton}
             />
@@ -147,26 +153,26 @@ export default function ProgressScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    paddingVertical: 24,
-    gap: 16,
+    paddingVertical: spacing.xl,
+    gap: spacing.lg,
   },
   header: {
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
   },
   tagline: {
-    marginTop: 4,
+    marginTop: spacing.xxs,
   },
   card: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E5E7EB",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    ...shadows.subtle,
   },
   cardLabel: {
-    letterSpacing: 0.8,
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   statsRow: {
     flexDirection: "row",
@@ -178,76 +184,79 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    height: 32,
-    backgroundColor: "#E5E7EB",
+    height: 36,
+    backgroundColor: colors.border,
   },
   speakingCheckCard: {
-    backgroundColor: "#F9FAFB",
-    borderColor: "#D1D5DB",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
   },
-  speakingCheckBadge: {
-    alignSelf: "flex-start",
-    backgroundColor: "#EFF6FF",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginBottom: 8,
+  badgeContainer: {
+    marginBottom: spacing.xs,
   },
   checkTitle: {
-    fontSize: 18,
+    marginBottom: 4,
   },
   checkDescription: {
-    marginTop: 6,
-    lineHeight: 20,
-    fontSize: 14,
+    lineHeight: 22,
   },
   checkButton: {
-    marginTop: 16,
+    marginTop: spacing.lg,
   },
   guestSyncCard: {
-    backgroundColor: "#F3F4F6",
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
     alignItems: "center",
-    gap: 8,
-    marginTop: 8,
+    gap: spacing.sm,
+    ...shadows.subtle,
+  },
+  guestSyncIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.full,
+    backgroundColor: colors.accentSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
   },
   guestSyncText: {
-    textAlign: "center",
-    marginBottom: 8,
+    lineHeight: 18,
+    marginBottom: spacing.xs,
   },
   syncButton: {
     width: "100%",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   modalCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
     width: "100%",
     maxWidth: 360,
     alignItems: "center",
-    gap: 12,
+    gap: spacing.md,
+    ...shadows.medium,
   },
-  modalBadge: {
-    backgroundColor: "#EFF6FF",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  modalTitle: {
-    textAlign: "center",
+  modalIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.full,
+    backgroundColor: colors.accentSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
   },
   modalBody: {
-    textAlign: "center",
-    lineHeight: 20,
-    marginBottom: 8,
+    marginBottom: spacing.xs,
   },
   modalButton: {
     width: "100%",
@@ -256,4 +265,5 @@ const styles = StyleSheet.create({
     width: "100%",
   },
 });
+
 

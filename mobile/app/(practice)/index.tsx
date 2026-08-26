@@ -10,6 +10,7 @@ import {
   AppState,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
 import { File } from "expo-file-system";
 import {
@@ -487,7 +488,7 @@ export default function DailyPracticeScreen() {
               );
             }}
           >
-            <Text style={styles.primaryButtonText}>🔄 Retry Feedback</Text>
+            <Text style={styles.primaryButtonText}>Retry Feedback</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -510,7 +511,7 @@ export default function DailyPracticeScreen() {
             <Text style={styles.summaryBadgeText}>SESSION COMPLETE</Text>
           </View>
 
-          <Text style={styles.completedHeading}>Daily Practice Finished! 🎉</Text>
+          <Text style={styles.completedHeading}>Daily Practice Finished</Text>
           <Text style={styles.completedSubheading}>
             You completed 3 interview speaking turns today.
           </Text>
@@ -573,10 +574,10 @@ export default function DailyPracticeScreen() {
           {/* Quick Metrics */}
           {lastMetrics && (
             <View style={styles.miniMetricsRow}>
-              <Text style={styles.miniMetricText}>⚡ {lastMetrics.wordsPerMinute} WPM</Text>
+              <Text style={styles.miniMetricText}>{lastMetrics.wordsPerMinute} WPM</Text>
               <Text style={styles.miniMetricText}>•</Text>
               <Text style={styles.miniMetricText}>
-                {lastMetrics.fillerCount === 0 ? "✨ 0 Fillers" : `⚠️ ${lastMetrics.fillerCount} Fillers`}
+                {lastMetrics.fillerCount === 0 ? "0 Fillers" : `${lastMetrics.fillerCount} Fillers`}
               </Text>
               <Text style={styles.miniMetricText}>•</Text>
               <Text style={styles.miniMetricText}>{lastMetrics.wordCount} words</Text>
@@ -596,8 +597,8 @@ export default function DailyPracticeScreen() {
               <Text style={styles.cardHeader}>Grammar & Phrasing Tips</Text>
               {turnFeedback.grammarIssues.map((issue, idx) => (
                 <View key={idx} style={styles.grammarItem}>
-                  <Text style={styles.grammarOriginal}>{`❌ "${issue.original}"`}</Text>
-                  <Text style={styles.grammarCorrection}>{`✅ "${issue.correction}"`}</Text>
+                  <Text style={styles.grammarOriginal}>{`Original: "${issue.original}"`}</Text>
+                  <Text style={styles.grammarCorrection}>{`Suggested: "${issue.correction}"`}</Text>
                   <Text style={styles.grammarExplanation}>{issue.explanation}</Text>
                 </View>
               ))}
@@ -660,9 +661,17 @@ export default function DailyPracticeScreen() {
           <TouchableOpacity
             style={[styles.ttsButton, isSpeakingTTS && styles.ttsButtonActive]}
             onPress={handlePlayTTS}
+            accessibilityRole="button"
+            accessibilityLabel={isSpeakingTTS ? "Stop reading question" : "Listen to question"}
           >
+            <Ionicons
+              name={isSpeakingTTS ? "stop-circle-outline" : "volume-high-outline"}
+              size={16}
+              color={isSpeakingTTS ? "#DC2626" : "#4F46E5"}
+              style={{ marginRight: 4 }}
+            />
             <Text style={styles.ttsButtonText}>
-              {isSpeakingTTS ? "⏹ Stop Listening" : "🔊 Listen Question"}
+              {isSpeakingTTS ? "Stop" : "Listen"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -696,8 +705,10 @@ export default function DailyPracticeScreen() {
                 <TouchableOpacity
                   style={styles.stopButton}
                   onPress={handleStopRecordingManually}
+                  accessibilityRole="button"
+                  accessibilityLabel="Finish speaking"
                 >
-                  <Text style={styles.stopButtonText}>Done Speaking ⏹</Text>
+                  <Text style={styles.stopButtonText}>Done Speaking</Text>
                 </TouchableOpacity>
               </View>
             ) : isRecorded ? (

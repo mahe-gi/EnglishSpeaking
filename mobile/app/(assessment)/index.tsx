@@ -9,6 +9,7 @@ import {
   ScrollView,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
 import { File } from "expo-file-system";
 import {
@@ -712,9 +713,17 @@ export default function AssessmentScreen() {
                 onPress={handleListenTTS}
                 disabled={recordingState === "recording" || recordingState === "uploading"}
                 style={styles.listenButton}
+                accessibilityRole="button"
+                accessibilityLabel={isSpeakingTTS ? "Stop prompt audio" : "Listen to prompt audio"}
               >
+                <Ionicons
+                  name={isSpeakingTTS ? "stop-circle-outline" : "volume-high-outline"}
+                  size={16}
+                  color="#111827"
+                  style={{ marginRight: 4 }}
+                />
                 <AppText variant="caption" weight="medium" color="#111827">
-                  {isSpeakingTTS ? "⏹ Stop" : "🔊 Listen"}
+                  {isSpeakingTTS ? "Stop" : "Listen"}
                 </AppText>
               </TouchableOpacity>
             </View>

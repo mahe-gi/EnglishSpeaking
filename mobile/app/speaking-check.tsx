@@ -1,11 +1,13 @@
 import React, { useState } from "react";
 import { View, StyleSheet, Modal } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "../components/Screen";
 import { AppText } from "../components/AppText";
 import { Button } from "../components/Button";
 import { useAuth } from "../hooks/useAuth";
 import AssessmentScreen from "./(assessment)/index";
+import { colors, radius, spacing, shadows } from "../theme";
 
 export default function SpeakingCheckRoute() {
   const router = useRouter();
@@ -18,15 +20,13 @@ export default function SpeakingCheckRoute() {
         <Modal visible={showGoogleModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
-              <View style={styles.modalBadge}>
-                <AppText variant="caption" weight="medium" color="#1D4ED8">
-                  📊 Speaking Check
-                </AppText>
+              <View style={styles.modalIconContainer}>
+                <Ionicons name="stats-chart" size={32} color={colors.accent} />
               </View>
-              <AppText variant="title" weight="semibold" style={styles.modalTitle}>
+              <AppText variant="title" align="center" color={colors.textPrimary}>
                 Sign in for Speaking Check
               </AppText>
-              <AppText variant="body" color="#4B5563" style={styles.modalBody}>
+              <AppText variant="body" align="center" color={colors.textSecondary} style={styles.modalBody}>
                 Sign in with Google to evaluate your communication baseline and save your speaking snapshot.
               </AppText>
 
@@ -42,7 +42,7 @@ export default function SpeakingCheckRoute() {
 
               <Button
                 title="Not now"
-                variant="outline"
+                variant="ghost"
                 onPress={() => {
                   setShowGoogleModal(false);
                   router.replace("/(tabs)" as any);
@@ -62,33 +62,32 @@ export default function SpeakingCheckRoute() {
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   modalCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
     width: "100%",
     maxWidth: 360,
     alignItems: "center",
-    gap: 12,
+    gap: spacing.md,
+    ...shadows.medium,
   },
-  modalBadge: {
-    backgroundColor: "#EFF6FF",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  modalTitle: {
-    textAlign: "center",
+  modalIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.full,
+    backgroundColor: colors.accentSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
   },
   modalBody: {
-    textAlign: "center",
-    lineHeight: 20,
-    marginBottom: 8,
+    marginBottom: spacing.xs,
   },
   modalButton: {
     width: "100%",
@@ -97,3 +96,4 @@ const styles = StyleSheet.create({
     width: "100%",
   },
 });
+

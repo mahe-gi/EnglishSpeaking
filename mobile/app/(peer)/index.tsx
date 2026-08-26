@@ -1,22 +1,25 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
-  Text,
   StyleSheet,
-  TouchableOpacity,
   ActivityIndicator,
   SafeAreaView,
   Animated,
   Easing,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { auth } from "../../lib/firebase";
+import { AppText } from "../../components/AppText";
+import { Button } from "../../components/Button";
+import { IconButton } from "../../components/IconButton";
 import {
   joinPeerQueue,
   getPeerQueueStatus,
   leavePeerQueue,
   PeerMatchDetails,
 } from "../../lib/api";
+import { colors, radius, spacing, shadows } from "../../theme";
 
 type QueueScreenState = "INITIALIZING" | "SEARCHING" | "MATCHED" | "TIMEOUT" | "ERROR";
 
@@ -174,7 +177,6 @@ export default function PeerMatchmakingScreen() {
     };
   }, [handleMatchFound, pollQueueStatus, stopPolling]);
 
-
   const handleCancel = async () => {
     stopPolling();
     try {
@@ -193,23 +195,27 @@ export default function PeerMatchmakingScreen() {
     <SafeAreaView style={styles.container}>
       {/* Top Bar */}
       <View style={styles.topBar}>
-        <TouchableOpacity
-          style={styles.closeButton}
+        <IconButton
+          icon={<Ionicons name="close" size={22} color={colors.textPrimary} />}
+          accessibilityLabel="Cancel matchmaking"
           onPress={handleCancel}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Text style={styles.closeButtonText}>✕</Text>
-        </TouchableOpacity>
-        <Text style={styles.topBarTitle}>Peer Practice</Text>
-        <View style={{ width: 36 }} />
+          variant="surface"
+          size={40}
+        />
+        <AppText variant="subtitle" color={colors.textPrimary}>
+          Peer Practice
+        </AppText>
+        <View style={{ width: 40 }} />
       </View>
 
       {/* Main Content Area */}
       <View style={styles.content}>
         {screenState === "INITIALIZING" && (
           <View style={styles.centerContainer}>
-            <ActivityIndicator size="large" color="#10B981" />
-            <Text style={styles.statusTitle}>Connecting to matchmaking...</Text>
+            <ActivityIndicator size="large" color={colors.brand} />
+            <AppText variant="title" color={colors.textPrimary} style={styles.statusTitle}>
+              Connecting to matchmaking...
+            </AppText>
           </View>
         )}
 
@@ -224,70 +230,93 @@ export default function PeerMatchmakingScreen() {
               ]}
             >
               <View style={styles.avatarCircle}>
-                <Text style={styles.avatarIcon}>🎙️</Text>
+                <Ionicons name="people" size={36} color={colors.accent} />
               </View>
             </Animated.View>
 
-            <Text style={styles.statusTitle}>Finding a practice partner...</Text>
-            <Text style={styles.statusSubtitle}>
-              Matching you with another English learner for 1-on-1 speaking.
-            </Text>
+            <AppText variant="titleLarge" align="center" color={colors.textPrimary} style={styles.statusTitle}>
+              Finding someone to practice with
+            </AppText>
+            <AppText variant="body" align="center" color={colors.textSecondary} style={styles.statusSubtitle}>
+              Matching you with another English learner for 1-on-1 spoken practice.
+            </AppText>
 
-            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
+            <Button
+              title="Cancel"
+              variant="secondary"
+              onPress={handleCancel}
+              style={styles.cancelButton}
+            />
           </View>
         )}
 
         {screenState === "MATCHED" && (
           <View style={styles.centerContainer}>
-            <View style={[styles.avatarCircle, { backgroundColor: "#10B981" }]}>
-              <Text style={styles.avatarIcon}>✓</Text>
+            <View style={[styles.avatarCircle, { backgroundColor: colors.successSubtle }]}>
+              <Ionicons name="checkmark" size={40} color={colors.success} />
             </View>
-            <Text style={styles.statusTitle}>Partner Found!</Text>
-            <Text style={styles.statusSubtitle}>Connecting to private voice room...</Text>
+            <AppText variant="titleLarge" align="center" color={colors.textPrimary} style={styles.statusTitle}>
+              Partner Found
+            </AppText>
+            <AppText variant="body" align="center" color={colors.textSecondary}>
+              Connecting to private audio room...
+            </AppText>
           </View>
         )}
 
         {screenState === "TIMEOUT" && (
           <View style={styles.centerContainer}>
-            <View style={[styles.avatarCircle, { backgroundColor: "#F3F4F6" }]}>
-              <Text style={styles.avatarIcon}>⏳</Text>
+            <View style={[styles.avatarCircle, { backgroundColor: colors.surfaceMuted }]}>
+              <Ionicons name="time-outline" size={40} color={colors.textSecondary} />
             </View>
-            <Text style={styles.statusTitle}>Still looking for someone.</Text>
-            <Text style={styles.statusSubtitle}>
-              No other learners joined the queue just now. You can keep searching or practice with AI.
-            </Text>
+            <AppText variant="titleLarge" align="center" color={colors.textPrimary} style={styles.statusTitle}>
+              No partner found just now
+            </AppText>
+            <AppText variant="body" align="center" color={colors.textSecondary} style={styles.statusSubtitle}>
+              No other learners joined the queue in the last minute. You can search again or practice with AI.
+            </AppText>
 
-            <TouchableOpacity style={styles.primaryButton} onPress={handleRetry}>
-              <Text style={styles.primaryButtonText}>Keep searching</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => router.replace("/voice")}
-            >
-              <Text style={styles.secondaryButtonText}>Talk with AI instead</Text>
-            </TouchableOpacity>
+            <View style={styles.buttonStack}>
+              <Button
+                title="Search Again"
+                onPress={handleRetry}
+                style={styles.fullWidthButton}
+              />
+              <Button
+                title="Talk with AI instead"
+                variant="secondary"
+                onPress={() => router.replace("/voice")}
+                style={styles.fullWidthButton}
+              />
+            </View>
           </View>
         )}
 
         {screenState === "ERROR" && (
           <View style={styles.centerContainer}>
-            <View style={[styles.avatarCircle, { backgroundColor: "#FEE2E2" }]}>
-              <Text style={styles.avatarIcon}>⚠️</Text>
+            <View style={[styles.avatarCircle, { backgroundColor: colors.dangerSubtle }]}>
+              <Ionicons name="alert-circle" size={40} color={colors.danger} />
             </View>
-            <Text style={styles.errorTitle}>Unable to Match</Text>
-            <Text style={styles.errorSubtitle}>{errorMessage || "An unexpected error occurred."}</Text>
+            <AppText variant="titleLarge" align="center" color={colors.textPrimary} style={styles.statusTitle}>
+              Unable to Match
+            </AppText>
+            <AppText variant="body" align="center" color={colors.textSecondary} style={styles.statusSubtitle}>
+              {errorMessage || "An unexpected network error occurred."}
+            </AppText>
 
-            <TouchableOpacity style={styles.primaryButton} onPress={handleRetry}>
-              <Text style={styles.primaryButtonText}>Try Again</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleCancel}>
-              <Text style={styles.secondaryButtonText}>Back to Home</Text>
-            </TouchableOpacity>
-
+            <View style={styles.buttonStack}>
+              <Button
+                title="Try Again"
+                onPress={handleRetry}
+                style={styles.fullWidthButton}
+              />
+              <Button
+                title="Back to Home"
+                variant="outline"
+                onPress={handleCancel}
+                style={styles.fullWidthButton}
+              />
+            </View>
           </View>
         )}
       </View>
@@ -298,38 +327,20 @@ export default function PeerMatchmakingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.background,
   },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-  },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#F3F4F6",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  closeButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#4B5563",
-  },
-  topBarTitle: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#111827",
+    borderBottomColor: colors.border,
   },
   content: {
     flex: 1,
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.xl,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -342,88 +353,40 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
     borderRadius: 70,
-    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    backgroundColor: colors.accentSubtle,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 36,
+    marginBottom: spacing.xl,
   },
   avatarCircle: {
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: "#ECFDF5",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
-  },
-  avatarIcon: {
-    fontSize: 40,
+    ...shadows.subtle,
   },
   statusTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#111827",
-    textAlign: "center",
-    marginBottom: 10,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
   },
   statusSubtitle: {
-    fontSize: 15,
-    color: "#6B7280",
-    textAlign: "center",
-    lineHeight: 22,
-    paddingHorizontal: 16,
-    marginBottom: 36,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xxl,
   },
   cancelButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 36,
-    borderRadius: 999,
-    backgroundColor: "#F3F4F6",
+    minWidth: 140,
   },
-  cancelButtonText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#4B5563",
-  },
-  primaryButton: {
+  buttonStack: {
     width: "100%",
-    backgroundColor: "#10B981",
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: "center",
-    marginBottom: 12,
+    gap: spacing.sm,
   },
-  primaryButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  secondaryButton: {
+  fullWidthButton: {
     width: "100%",
-    backgroundColor: "#F3F4F6",
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: "center",
-  },
-  secondaryButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#374151",
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#DC2626",
-    textAlign: "center",
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  errorSubtitle: {
-    fontSize: 15,
-    color: "#6B7280",
-    textAlign: "center",
-    lineHeight: 22,
-    paddingHorizontal: 16,
-    marginBottom: 32,
   },
 });
+
 

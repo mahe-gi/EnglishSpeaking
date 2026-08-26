@@ -1,13 +1,26 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { View, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  withSequence,
+  Easing,
+  cancelAnimation,
+} from "react-native-reanimated";
 import { AudioSession } from "@livekit/react-native";
 import { Room, RoomEvent, Participant, Track } from "livekit-client";
 import { AppText } from "../components/AppText";
+import { IconButton } from "../components/IconButton";
+import { Button } from "../components/Button";
 import { useAuth } from "../hooks/useAuth";
 import { auth } from "../lib/firebase";
 import { getInstallationId } from "../lib/installation";
 import { createVoiceSession, VoiceSessionData } from "../lib/api";
+import { colors, radius, spacing, shadows } from "../theme";
 
 type VoiceUIState = "initializing" | "connecting" | "listening" | "thinking" | "speaking" | "ended" | "error";
 
@@ -20,14 +33,76 @@ export default function VoiceScreen() {
   const [sessionData, setSessionData] = useState<VoiceSessionData | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [agentPresent, setAgentPresent] = useState(false);
 
   const roomRef = useRef<Room | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentPresentRef = useRef(false);
   const hasCleanedUp = useRef(false);
+
+  const markAgentPresent = useCallback(() => {
+    agentPresentRef.current = true;
+    setAgentPresent(true);
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
+  }, []);
+
+  // Reanimated shared values for organic, subtle breathing voice orb
+  const orbScale = useSharedValue(1);
+  const orbOpacity = useSharedValue(0.85);
+
+  useEffect(() => {
+    if (uiState === "speaking") {
+      orbScale.value = withRepeat(
+        withSequence(
+          withTiming(1.18, { duration: 750, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1.0, { duration: 750, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+      orbOpacity.value = withRepeat(
+        withSequence(
+          withTiming(1.0, { duration: 750 }),
+          withTiming(0.7, { duration: 750 })
+        ),
+        -1,
+        true
+      );
+    } else if (uiState === "listening" && !isMuted) {
+      orbScale.value = withRepeat(
+        withSequence(
+          withTiming(1.08, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1.0, { duration: 1200, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+      orbOpacity.value = withTiming(0.9, { duration: 300 });
+    } else {
+      cancelAnimation(orbScale);
+      cancelAnimation(orbOpacity);
+      orbScale.value = withTiming(1.0, { duration: 300 });
+      orbOpacity.value = withTiming(0.8, { duration: 300 });
+    }
+  }, [uiState, isMuted, orbScale, orbOpacity]);
+
+  const animatedOrbStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: orbScale.value }],
+    opacity: orbOpacity.value,
+  }));
 
   const cleanup = useCallback(async () => {
     if (hasCleanedUp.current) return;
     hasCleanedUp.current = true;
+
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
 
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -55,107 +130,136 @@ export default function VoiceScreen() {
     router.replace("/(tabs)" as any);
   }, [cleanup, router]);
 
-  useEffect(() => {
-    let isMounted = true;
+  const startSession = useCallback(async () => {
+    hasCleanedUp.current = false;
+    setErrorMessage(null);
+    setElapsedSeconds(0);
+    agentPresentRef.current = false;
+    setAgentPresent(false);
 
-    async function initSession() {
-      try {
-        setUiState("initializing");
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-          throw new Error("Authentication required. Please sign in.");
-        }
-
-        const idToken = await currentUser.getIdToken();
-        const installationId = await getInstallationId();
-        const idempotencyKey = `mob_voice_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-
-        console.log("[Voice] Creating voice session on backend...");
-        const data = await createVoiceSession(idToken, installationId, idempotencyKey);
-        if (!isMounted) return;
-
-        setSessionData(data);
-        console.log(`[Voice] Session created: ${data.sessionId}, Room: ${data.roomName}`);
-
-        // Start native audio session
-        await AudioSession.startAudioSession();
-        if (!isMounted) return;
-
-        setUiState("connecting");
-
-        // Initialize LiveKit Room
-        const room = new Room({
-          audioCaptureDefaults: {
-            autoGainControl: true,
-            echoCancellation: true,
-            noiseSuppression: true,
-          },
-        });
-        roomRef.current = room;
-
-        // Room event listeners
-        room.on(RoomEvent.Connected, () => {
-          if (!isMounted) return;
-          console.log("[Voice] Connected to LiveKit room.");
-          setUiState("listening");
-
-          // Start elapsed timer
-          if (!timerRef.current) {
-            timerRef.current = setInterval(() => {
-              setElapsedSeconds((prev) => prev + 1);
-            }, 1000);
-          }
-        });
-
-        room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
-          if (!isMounted) return;
-          const agentSpeaking = speakers.some((p) => p.identity.includes("agent"));
-          const userSpeaking = speakers.some((p) => p.identity === room.localParticipant.identity);
-
-          if (agentSpeaking) {
-            setUiState("speaking");
-          } else if (userSpeaking) {
-            setUiState("listening");
-          } else {
-            // Default to listening when idle
-            setUiState((prev) => (prev === "speaking" ? "listening" : prev));
-          }
-        });
-
-        room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
-          if (!isMounted) return;
-          if (track.kind === Track.Kind.Audio && participant.identity.includes("agent")) {
-            console.log("[Voice] Subscribed to Agent audio track.");
-            setUiState("speaking");
-          }
-        });
-
-        room.on(RoomEvent.Disconnected, () => {
-          if (!isMounted) return;
-          console.log("[Voice] LiveKit room disconnected.");
-          setUiState("ended");
-          handleExit();
-        });
-
-        // Connect and publish microphone
-        await room.connect(data.livekitUrl, data.participantToken);
-        await room.localParticipant.setMicrophoneEnabled(true);
-      } catch (err: unknown) {
-        if (!isMounted) return;
-        console.error("[Voice] Initialization failed:", err);
-        const msg = err instanceof Error ? err.message : "Failed to connect to voice session.";
-        setErrorMessage(msg);
-        setUiState("error");
-      }
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
     }
 
-    initSession();
+    try {
+      setUiState("initializing");
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("Authentication required. Please sign in.");
+      }
 
+      const idToken = await currentUser.getIdToken();
+      const installationId = await getInstallationId();
+      const idempotencyKey = `mob_voice_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+      console.log("[Voice] Creating voice session on backend...");
+      const data = await createVoiceSession(idToken, installationId, idempotencyKey);
+      setSessionData(data);
+      console.log(`[Voice] Session created: ${data.sessionId}, Room: ${data.roomName}`);
+
+      await AudioSession.startAudioSession();
+      setUiState("connecting");
+
+      const room = new Room({
+        audioCaptureDefaults: {
+          autoGainControl: true,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      roomRef.current = room;
+
+      // 18-second bounded connection safety timeout using imperative ref authority
+      connectionTimeoutRef.current = setTimeout(() => {
+        if (room.state === "connected" && !agentPresentRef.current) {
+          console.warn("[Voice] Connection timeout: Agent did not respond in time.");
+          setErrorMessage("The AI speaking partner took too long to connect. Please try again.");
+          setUiState("error");
+        }
+      }, 18000);
+
+      const isRemoteAgent = (p: Participant) => {
+        if (p.identity === room.localParticipant.identity) return false;
+        return (
+          p.identity.toLowerCase().includes("agent") ||
+          (p as any).kind === 2 ||
+          (p as any).kind === "agent" ||
+          (p as any).isAgent === true ||
+          true // Single-occupant AI practice room: any remote participant is the agent
+        );
+      };
+
+      room.on(RoomEvent.Connected, () => {
+        console.log("[Voice] Connected to LiveKit room.");
+
+        // Check if agent is already in room
+        const hasAgent = Array.from(room.remoteParticipants.values()).some((p) =>
+          isRemoteAgent(p)
+        );
+        if (hasAgent) {
+          markAgentPresent();
+          setUiState("listening");
+        }
+
+        if (!timerRef.current) {
+          timerRef.current = setInterval(() => {
+            setElapsedSeconds((prev) => prev + 1);
+          }, 1000);
+        }
+      });
+
+      room.on(RoomEvent.ParticipantConnected, (participant: Participant) => {
+        console.log(`[Voice] Participant connected: ${participant.identity}`);
+        if (isRemoteAgent(participant)) {
+          markAgentPresent();
+          setUiState("listening");
+        }
+      });
+
+      room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+        const agentSpeaking = speakers.some((p) => isRemoteAgent(p));
+        const userSpeaking = speakers.some((p) => p.identity === room.localParticipant.identity);
+
+        if (agentSpeaking) {
+          setUiState("speaking");
+        } else if (userSpeaking) {
+          setUiState("listening");
+        } else {
+          setUiState((prev) => (prev === "speaking" ? "listening" : prev));
+        }
+      });
+
+      room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+        if (track.kind === Track.Kind.Audio && isRemoteAgent(participant)) {
+          console.log("[Voice] Subscribed to Agent audio track.");
+          markAgentPresent();
+          setUiState("speaking");
+        }
+      });
+
+      room.on(RoomEvent.Disconnected, () => {
+        console.log("[Voice] LiveKit room disconnected.");
+        setUiState("ended");
+        handleExit();
+      });
+
+      await room.connect(data.livekitUrl, data.participantToken);
+      await room.localParticipant.setMicrophoneEnabled(true);
+    } catch (err: unknown) {
+      console.error("[Voice] Initialization failed:", err);
+      const msg = err instanceof Error ? err.message : "Failed to connect to voice session.";
+      setErrorMessage(msg);
+      setUiState("error");
+    }
+  }, [handleExit, markAgentPresent]);
+
+  useEffect(() => {
+    startSession();
     return () => {
-      isMounted = false;
       cleanup();
     };
-  }, [cleanup, handleExit]);
+  }, []);
 
   const toggleMute = async () => {
     if (!roomRef.current) return;
@@ -173,47 +277,62 @@ export default function VoiceScreen() {
   const renderStatus = () => {
     switch (uiState) {
       case "initializing":
-        return "Preparing conversation...";
+        return "Setting up practice...";
       case "connecting":
-        return "Connecting to AI partner...";
+        return "Connecting with AI partner...";
       case "speaking":
         return "Ntalo is speaking...";
       case "thinking":
         return "Thinking...";
       case "listening":
-        return isMuted ? "Microphone muted" : "Listening to you...";
+        return isMuted ? "Microphone is muted" : "Listening to you...";
       case "ended":
-        return "Conversation ended";
+        return "Conversation completed";
       case "error":
-        return errorMessage || "Connection error";
+        return errorMessage || "Connection issue";
     }
   };
 
   const getOrbBackground = () => {
-    if (uiState === "speaking") return "#2563EB"; // Blue active
-    if (uiState === "listening" && !isMuted) return "#059669"; // Emerald listening
-    if (isMuted) return "#DC2626"; // Red muted
-    if (uiState === "error") return "#9CA3AF";
-    return "#111827"; // Neutral dark
+    if (uiState === "speaking") return colors.voiceSpeaking;
+    if (uiState === "listening" && !isMuted) return colors.voiceListening;
+    if (isMuted) return colors.voiceMuted;
+    if (uiState === "error") return colors.textTertiary;
+    return colors.brand;
+  };
+
+  const getOrbIcon = () => {
+    if (uiState === "initializing" || uiState === "connecting") {
+      return <ActivityIndicator color={colors.textInverse} size="small" />;
+    }
+    if (uiState === "speaking") {
+      return <Ionicons name="volume-high" size={32} color={colors.textInverse} />;
+    }
+    if (isMuted) {
+      return <Ionicons name="mic-off" size={32} color={colors.textInverse} />;
+    }
+    if (uiState === "error") {
+      return <Ionicons name="alert-circle" size={32} color={colors.textInverse} />;
+    }
+    return <Ionicons name="mic" size={32} color={colors.textInverse} />;
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        {/* Top Header with Timer and X button */}
+        {/* Top Header with Timer and Close Button */}
         <View style={styles.topHeader}>
-          <TouchableOpacity
-            style={styles.exitButton}
-            activeOpacity={0.7}
+          <IconButton
+            icon={<Ionicons name="close" size={22} color={colors.textPrimary} />}
+            accessibilityLabel="Exit conversation"
             onPress={handleExit}
-          >
-            <AppText variant="title" color="#4B5563" style={styles.exitText}>
-              ✕
-            </AppText>
-          </TouchableOpacity>
+            variant="surface"
+            size={44}
+          />
 
           <View style={styles.timerBadge}>
-            <AppText variant="caption" weight="semibold" color="#111827">
+            <Ionicons name="time-outline" size={14} color={colors.textSecondary} style={styles.timerIcon} />
+            <AppText variant="captionMedium" color={colors.textPrimary}>
               {formatTimer(elapsedSeconds)}
               {sessionData?.allowedSeconds ? ` / ${formatTimer(sessionData.allowedSeconds)}` : ""}
             </AppText>
@@ -222,41 +341,83 @@ export default function VoiceScreen() {
           <View style={styles.placeholderRight} />
         </View>
 
-        {/* Center Orb & Status */}
+        {/* Center Orb & Visualizer */}
         <View style={styles.centerContainer}>
           <View style={styles.orbOuter}>
-            <View style={[styles.orbInner, { backgroundColor: getOrbBackground() }]}>
-              {uiState === "initializing" || uiState === "connecting" ? (
-                <ActivityIndicator color="#FFFFFF" size="large" />
-              ) : (
-                <AppText variant="title" color="#FFFFFF" style={styles.orbIcon}>
-                  {uiState === "speaking" ? "🔊" : isMuted ? "🔇" : "🎙"}
-                </AppText>
-              )}
-            </View>
+            <Animated.View
+              style={[
+                styles.orbInner,
+                { backgroundColor: getOrbBackground() },
+                animatedOrbStyle,
+              ]}
+            >
+              {getOrbIcon()}
+            </Animated.View>
           </View>
 
-          <AppText variant="subtitle" weight="semibold" color="#111827" style={styles.statusText}>
+          <AppText variant="title" align="center" color={colors.textPrimary} style={styles.statusText}>
             {renderStatus()}
           </AppText>
 
-          <AppText variant="caption" color="#6B7280" style={styles.subStatusText}>
+          <AppText variant="caption" align="center" color={colors.textSecondary}>
             {productState === "GUEST"
-              ? "Free Guest Preview (120s limit)"
-              : "Daily Speaking Practice"}
+              ? "Guest preview • 2 min session limit"
+              : "Spoken conversation practice"}
           </AppText>
+
+          {uiState === "error" && (
+            <View style={styles.errorActionRow}>
+              <Button
+                title="Try Again"
+                size="sm"
+                onPress={startSession}
+                style={styles.retryButton}
+              />
+              <Button
+                title="Exit"
+                variant="outline"
+                size="sm"
+                onPress={handleExit}
+                style={styles.retryButton}
+              />
+            </View>
+          )}
         </View>
 
-        {/* Bottom Controls */}
+        {/* Bottom Call Controls */}
         <View style={styles.bottomControls}>
           <TouchableOpacity
             style={[styles.muteButton, isMuted && styles.mutedActive]}
             activeOpacity={0.8}
             onPress={toggleMute}
+            accessibilityRole="button"
+            accessibilityLabel={isMuted ? "Unmute microphone" : "Mute microphone"}
             disabled={uiState === "initializing" || uiState === "connecting" || uiState === "error"}
           >
-            <AppText variant="body" weight="medium" color={isMuted ? "#B91C1C" : "#111827"}>
-              {isMuted ? "🔇 Unmute Mic" : "🎙 Mute Mic"}
+            <Ionicons
+              name={isMuted ? "mic-off" : "mic"}
+              size={20}
+              color={isMuted ? colors.danger : colors.textPrimary}
+            />
+            <AppText
+              variant="bodyMedium"
+              color={isMuted ? colors.danger : colors.textPrimary}
+              style={styles.muteButtonText}
+            >
+              {isMuted ? "Unmute" : "Mute"}
+            </AppText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.endCallButton}
+            activeOpacity={0.8}
+            onPress={handleExit}
+            accessibilityRole="button"
+            accessibilityLabel="End practice session"
+          >
+            <Ionicons name="call" size={20} color={colors.textInverse} />
+            <AppText variant="bodyMedium" color={colors.textInverse} style={styles.endCallText}>
+              End Call
             </AppText>
           </TouchableOpacity>
         </View>
@@ -268,13 +429,13 @@ export default function VoiceScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.background,
   },
   container: {
     flex: 1,
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
   },
   topHeader: {
     flexDirection: "row",
@@ -282,78 +443,93 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     height: 48,
   },
-  exitButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#F3F4F6",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  exitText: {
-    fontSize: 18,
-    lineHeight: 20,
-  },
   timerBadge: {
-    backgroundColor: "#F3F4F6",
-    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: radius.full,
+    ...shadows.subtle,
+  },
+  timerIcon: {
+    marginRight: 6,
   },
   placeholderRight: {
-    width: 40,
+    width: 44,
   },
   centerContainer: {
     alignItems: "center",
-    gap: 16,
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
   },
   orbOuter: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    backgroundColor: "#F3F4F6",
+    width: 144,
+    height: 144,
+    borderRadius: 72,
+    backgroundColor: colors.surfaceMuted,
     justifyContent: "center",
     alignItems: "center",
+    marginBottom: spacing.xs,
   },
   orbInner: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: "#111827",
+    width: 104,
+    height: 104,
+    borderRadius: 52,
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  orbIcon: {
-    fontSize: 32,
+    ...shadows.medium,
   },
   statusText: {
-    fontSize: 18,
-    textAlign: "center",
+    maxWidth: 280,
   },
-  subStatusText: {
-    textAlign: "center",
+  errorActionRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  retryButton: {
+    minWidth: 110,
   },
   bottomControls: {
     flexDirection: "row",
     justifyContent: "center",
-    marginBottom: 24,
+    alignItems: "center",
+    gap: spacing.md,
+    marginBottom: spacing.xl,
   },
   muteButton: {
-    backgroundColor: "#F3F4F6",
-    paddingHorizontal: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 12,
-    borderRadius: 24,
+    borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: colors.border,
+    minHeight: 48,
+    ...shadows.subtle,
   },
   mutedActive: {
-    backgroundColor: "#FEF2F2",
-    borderColor: "#FCA5A5",
+    backgroundColor: colors.dangerSubtle,
+    borderColor: "#FECACA",
+  },
+  muteButtonText: {
+    marginLeft: spacing.xs,
+  },
+  endCallButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.danger,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
+    borderRadius: radius.full,
+    minHeight: 48,
+    ...shadows.subtle,
+  },
+  endCallText: {
+    marginLeft: spacing.xs,
   },
 });
-

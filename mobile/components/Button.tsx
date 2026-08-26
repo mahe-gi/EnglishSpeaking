@@ -5,19 +5,25 @@ import {
   ActivityIndicator,
   StyleSheet,
   ViewStyle,
+  View,
 } from "react-native";
 import { AppText } from "./AppText";
+import { colors, radius, spacing } from "../theme";
 
 export interface ButtonProps extends TouchableOpacityProps {
   title: string;
-  variant?: "primary" | "secondary" | "outline";
+  variant?: "primary" | "secondary" | "outline" | "danger" | "ghost";
+  size?: "sm" | "md" | "lg";
+  icon?: React.ReactNode;
   loading?: boolean;
-  style?: ViewStyle;
+  style?: ViewStyle | ViewStyle[];
 }
 
 export const Button: React.FC<ButtonProps> = ({
   title,
   variant = "primary",
+  size = "md",
+  icon,
   loading = false,
   disabled,
   style,
@@ -25,27 +31,47 @@ export const Button: React.FC<ButtonProps> = ({
 }) => {
   const isDisabled = disabled || loading;
 
-  const textColor =
-    variant === "outline" ? "#111827" : variant === "secondary" ? "#374151" : "#FFFFFF";
+  const getTextColor = () => {
+    switch (variant) {
+      case "primary":
+        return colors.textInverse;
+      case "secondary":
+        return colors.textPrimary;
+      case "outline":
+        return colors.textPrimary;
+      case "danger":
+        return colors.textInverse;
+      case "ghost":
+        return colors.textSecondary;
+    }
+  };
 
   return (
     <TouchableOpacity
       activeOpacity={0.8}
       disabled={isDisabled}
+      accessibilityRole="button"
       style={[
         styles.base,
         styles[variant],
+        styles[size],
         isDisabled && styles.disabled,
         style,
       ]}
       {...props}
     >
       {loading ? (
-        <ActivityIndicator color={textColor} size="small" />
+        <ActivityIndicator color={getTextColor()} size="small" />
       ) : (
-        <AppText weight="medium" style={{ color: textColor }}>
-          {title}
-        </AppText>
+        <View style={styles.contentRow}>
+          {icon && <View style={styles.iconContainer}>{icon}</View>}
+          <AppText
+            variant={size === "sm" ? "captionMedium" : "bodyMedium"}
+            color={getTextColor()}
+          >
+            {title}
+          </AppText>
+        </View>
       )}
     </TouchableOpacity>
   );
@@ -53,24 +79,53 @@ export const Button: React.FC<ButtonProps> = ({
 
 const styles = StyleSheet.create({
   base: {
-    height: 48,
-    borderRadius: 8,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 20,
+    minHeight: 48,
+    minWidth: 44,
+  },
+  contentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconContainer: {
+    marginRight: spacing.xs,
+  },
+  sm: {
+    height: 38,
+    minHeight: 38,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+  },
+  md: {
+    height: 48,
+    paddingHorizontal: spacing.lg,
+  },
+  lg: {
+    height: 54,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.lg,
   },
   primary: {
-    backgroundColor: "#111827",
+    backgroundColor: colors.brand,
   },
   secondary: {
-    backgroundColor: "#F3F4F6",
+    backgroundColor: colors.surfaceMuted,
   },
   outline: {
     backgroundColor: "transparent",
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: colors.border,
+  },
+  danger: {
+    backgroundColor: colors.danger,
+  },
+  ghost: {
+    backgroundColor: "transparent",
   },
   disabled: {
-    opacity: 0.5,
+    opacity: 0.45,
   },
 });
