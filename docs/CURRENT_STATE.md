@@ -10,8 +10,9 @@ Ntalo V2 — Production AI Fix & Complete Mobile UI/UX Design System Polish (Com
 - **1. Production AI Fix ("Talk with AI" / LiveKit Agent Worker):**
   - **Worker Dependency Resolution (`agent/package.json`):** Moved `tsx` and `typescript` from `devDependencies` to `dependencies` so production builds (`npm install --omit=dev`) contain runtime executables.
   - **Containerized Agent (`agent/Dockerfile`):** Added production Dockerfile based on `node:22-bookworm-slim` for consistent container deployment in DigitalOcean.
+  - **Container Health Check Probe (`agent/src/agent.ts`):** Embedded lightweight HTTP server on port 8080 responding 200 OK to `/health` with graceful `EADDRINUSE` handling in child worker processes.
   - **LiveKit Agent Dispatch Contract:** Explicit dispatch on `agentName: "ntalo-voice-poc"` aligned across backend, worker, and LiveKit Cloud.
-  - **AI Voice Call Screen Resilience (`mobile/app/voice.tsx`):** Added explicit 18s connection timeout, participant join detection, and graceful fallback UI.
+  - **AI Voice Call Screen Resilience (`mobile/app/voice.tsx`):** Fixed stale timeout closures using imperative `agentPresentRef`, unified `markAgentPresent()` helper across `Connected`, `ParticipantConnected`, and `TrackSubscribed`, and added 18s fallback with retry/dismiss actions.
 
 - **2. Coherent Ntalo Design System (`mobile/theme/` & `mobile/components/`):**
   - **Design Tokens:** Defined semantic tokens for `colors` (slate/zinc palette, brand accent #2563EB, status colors), `typography` (inter-scale with explicit lineHeight and fontWeights), `spacing` (4px grid), `radius` (4px to full), and `shadows`.
