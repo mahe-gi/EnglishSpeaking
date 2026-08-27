@@ -49,7 +49,7 @@ try {
   healthServer.listen(httpPort, () => {
     console.log(`[Agent] Health check server listening on port ${httpPort}`);
   });
-} catch (e) {
+} catch {
   // Ignored in worker child processes
 }
 
