@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/agent.ts dev",
-    "start": "tsx src/agent.ts start",
+    "download": "livekit-agents download-files",
+    "prebuild": "livekit-agents download-files",
+    "build": "tsc",
+    "start": "node dist/agent.js start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },

@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import { defineAgent, JobContext, cli, WorkerOptions, voice, inference } from "@livekit/agents";
+import { defineAgent, JobContext, JobProcess, cli, WorkerOptions, voice, inference } from "@livekit/agents";
 import * as sarvam from "@livekit/agents-plugin-sarvam";
 import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
@@ -29,9 +29,21 @@ const backendClient = new BackendClient({
 });
 
 export default defineAgent({
+  prewarm: async (proc: JobProcess) => {
+    const t0 = Date.now();
+    console.log(`[AgentInit] PREWARM_STARTED (pid=${proc.pid})`);
+
+    const tSilero = Date.now();
+    console.log(`[AgentInit] SILERO_LOAD_STARTED`);
+    const vad = await silero.VAD.load();
+    console.log(`[AgentInit] SILERO_LOAD_COMPLETED in ${Date.now() - tSilero}ms`);
+
+    proc.userData.vad = vad;
+    console.log(`[AgentInit] PREWARM_COMPLETED in ${Date.now() - t0}ms`);
+  },
   entry: async (ctx: JobContext) => {
     const roomName = ctx.room.name || "";
-    console.log(`[Agent] Job received for room: ${roomName}`);
+    console.log(`[AgentInit] ENTRY_STARTED room=${roomName} (pid=${process.pid})`);
 
     // Parse job metadata
     let sessionId: string | null = null;
@@ -59,8 +71,8 @@ export default defineAgent({
     await ctx.connect();
     console.log(`[Agent] Connected to LiveKit room: ${roomName}`);
 
-    // 1. Initialize Pipeline Plugins
-    const vad = await silero.VAD.load();
+    // 1. Resolve Prewarmed VAD
+    const vad = (ctx.proc.userData.vad as silero.VAD) || (await silero.VAD.load());
 
     const stt = new sarvam.STT({
       model: "saaras:v3",
@@ -205,5 +217,6 @@ cli.runApp(
   new WorkerOptions({
     agent: fileURLToPath(import.meta.url),
     agentName: "ntalo-voice-poc",
+    initializeProcessTimeout: 30000,
   })
 );
