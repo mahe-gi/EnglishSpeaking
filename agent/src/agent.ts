@@ -6,6 +6,7 @@ import * as sarvam from "@livekit/agents-plugin-sarvam";
 import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
 import { fileURLToPath } from "node:url";
+import http from "node:http";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { BackendClient } from "./backend-client.js";
 
@@ -22,6 +23,22 @@ if (!sarvamKey) {
   console.error("❌ SARVAM_API_KEY is required on startup.");
   process.exit(1);
 }
+
+// Lightweight HTTP server for container health checks (DigitalOcean / PaaS readiness probes)
+const httpPort = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+const healthServer = http.createServer((req, res) => {
+  if (req.url === "/health" || req.url === "/") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok", worker: "ntalo-voice-poc", uptime: process.uptime() }));
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+});
+
+healthServer.listen(httpPort, () => {
+  console.log(`[Agent] Health check server listening on port ${httpPort}`);
+});
 
 const backendClient = new BackendClient({
   backendUrl,
