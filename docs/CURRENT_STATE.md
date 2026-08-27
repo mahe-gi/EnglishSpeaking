@@ -3,14 +3,13 @@
 Last updated: August 26, 2026
 
 ### Current milestone
-Ntalo V2 — Production AI Fix & Complete Mobile UI/UX Design System Polish (Complete)
+Ntalo V2 — Production AI Fix & Cloud-Only Verification (In Progress)
 
 ## Completed
 
-- **1. Production AI Fix ("Talk with AI" / LiveKit Agent Worker):**
+- **1. Production AI Fix Implementation:**
   - **Worker Dependency Resolution (`agent/package.json`):** Moved `tsx` and `typescript` from `devDependencies` to `dependencies` so production builds (`npm install --omit=dev`) contain runtime executables.
   - **Containerized Agent (`agent/Dockerfile`):** Added production Dockerfile based on `node:22-bookworm-slim` for consistent container deployment in DigitalOcean.
-  - **Container Health Check Probe (`agent/src/agent.ts`):** Embedded lightweight HTTP server on port 8080 responding 200 OK to `/health` with graceful `EADDRINUSE` handling in child worker processes.
   - **LiveKit Agent Dispatch Contract:** Explicit dispatch on `agentName: "ntalo-voice-poc"` aligned across backend, worker, and LiveKit Cloud.
   - **AI Voice Call Screen Resilience (`mobile/app/voice.tsx`):** Fixed stale timeout closures using imperative `agentPresentRef`, unified `markAgentPresent()` helper across `Connected`, `ParticipantConnected`, and `TrackSubscribed`, and added 18s fallback with retry/dismiss actions.
 
@@ -37,11 +36,13 @@ Ntalo V2 — Production AI Fix & Complete Mobile UI/UX Design System Polish (Com
   - Serialized matchmaking queue, authoritative LiveKit webhooks, 0-second unbilled cancellations, safety reporting, and two-user physical Android test verification.
 
 ## Currently working on
-Production AI Fix and Mobile UI/UX polish completed and verified.
+P0 credential rotation verification and P1 Production AI end-to-end cloud-only runtime acceptance.
 
 ## Next exact task
-1. Trigger mobile preview build / test on physical device.
-2. Monitor production agent worker on DigitalOcean with LiveKit Cloud.
+1. Rotate exposed credentials in LiveKit and Neon DB, ensuring zero secrets are printed.
+2. Verify DigitalOcean worker deployment (`englishspeaking-agent`).
+3. Execute strict cloud-only Android test against DigitalOcean backend, LiveKit Cloud, and Sarvam.
+4. Verify DB lifecycle (`COMPLETED`, `actualSeconds > 0`, single `UsageLedger`).
 
 Do not implement:
 - LiveKit video calls, screen sharing, group calls
