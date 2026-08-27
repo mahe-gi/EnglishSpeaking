@@ -36,9 +36,22 @@ const healthServer = http.createServer((req, res) => {
   }
 });
 
-healthServer.listen(httpPort, () => {
-  console.log(`[Agent] Health check server listening on port ${httpPort}`);
+healthServer.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    // Child worker process spawned by ProcPool; ignore duplicate bind
+    console.log(`[Agent] Health port ${httpPort} already bound by parent process.`);
+  } else {
+    console.warn(`[Agent] Health server error:`, err);
+  }
 });
+
+try {
+  healthServer.listen(httpPort, () => {
+    console.log(`[Agent] Health check server listening on port ${httpPort}`);
+  });
+} catch (e) {
+  // Ignored in worker child processes
+}
 
 const backendClient = new BackendClient({
   backendUrl,
